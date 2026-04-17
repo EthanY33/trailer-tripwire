@@ -1,0 +1,20 @@
+node_modules/
+# package-lock.json is committed — reproducible installs for this CLI tool
+pnpm-lock.yaml
+yarn.lock
+
+# Example content (downloaded video files — don't ship)
+examples/*.mp4
+examples/*.webm
+examples/*.mkv
+content-refs/*.mp4
+content-refs/*.webm
+content-refs/*.mkv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
