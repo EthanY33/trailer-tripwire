@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.0//EN" "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd">
+<svg width="1528.33" height="667.36" xmlns="http://www.w3.org/2000/svg">
+<rect width="1488.33" height="627.36" fill="#0d1117" rx="8.00" ry="8.00" filter="url(#shadow)" x="20.00px" y="20.00px"/>
+<g font-family="JetBrains Mono,Consolas,Menlo,monospace" font-size="13.00px" fill="#e6edf3" clip-path="url(#terminalMask)">
+<text x="60.00px" y="81.90px" xml:space="preserve">$ trailer-tripwire audit demo/bad-trailer.mp4 --ref demo/google-canvas.profile.json
+</text><text x="60.00px" y="98.80px" xml:space="preserve">
+</text><text x="60.00px" y="115.70px" xml:space="preserve">→ analyzing demo\bad-trailer.mp4
+</text><text x="60.00px" y="132.60px" xml:space="preserve">
+</text><text x="60.00px" y="149.50px" xml:space="preserve"># Trailer audit — bad-trailer.mp4
+</text><text x="60.00px" y="166.40px" xml:space="preserve">
+</text><text x="60.00px" y="183.30px" xml:space="preserve">- **Duration:** 60.0s
+</text><text x="60.00px" y="200.20px" xml:space="preserve">- **Resolution:** 1920×1080 @ 25.0fps
+</text><text x="60.00px" y="217.10px" xml:space="preserve">- **Audio:** yes | 6.7% below -50dBFS | peak -31.4dBFS
+</text><text x="60.00px" y="234.00px" xml:space="preserve">- **Shots (scene threshold 0.15):** 3 | median 28.68s | 0.033/s
+</text><text x="60.00px" y="250.90px" xml:space="preserve">- **Fade-based transitions:** 1/3 (50.0%)
+</text><text x="60.00px" y="267.80px" xml:space="preserve">- **Reference:** google-canvas (60.0s, 0.167/s, fade 40.0%)
+</text><text x="60.00px" y="284.70px" xml:space="preserve">
+</text><text x="60.00px" y="301.60px" xml:space="preserve">## CRITICAL
+</text><text x="60.00px" y="318.50px" xml:space="preserve">- **[fade-to-black]** 1/3 cuts (50.0%) land inside black windows — reads as slideshow. Professional editorial uses hard cuts or match cuts; fade-to-black is for chapter breaks only.
+</text><text x="60.00px" y="335.40px" xml:space="preserve">
+</text><text x="60.00px" y="352.30px" xml:space="preserve">## WARN
+</text><text x="60.00px" y="369.20px" xml:space="preserve">- **[long-black]** 4 long black windows (&gt;1.5s each) — trailer feels sparse or unfinished.
+</text><text x="60.00px" y="386.10px" xml:space="preserve">
+</text><text x="60.00px" y="403.00px" xml:space="preserve">## NOTE
+</text><text x="60.00px" y="419.90px" xml:space="preserve">- **[pacing]** Median shot length is 28.68s — very static. Works if intentional (tech-launch slow holds); flags as AI-default if unintentional.
+</text><text x="60.00px" y="436.80px" xml:space="preserve">
+</text><text x="60.00px" y="453.70px" xml:space="preserve">## OK
+</text><text x="60.00px" y="470.60px" xml:space="preserve">- Audio density: 6.7% silent (under -50dBFS) — filled.
+</text><text x="60.00px" y="487.50px" xml:space="preserve">- Audio dynamics: RMS stdev 8.33 dB — expressive.
+</text><text x="60.00px" y="504.40px" xml:space="preserve">- Pacing matches reference within ±0.2/s (0.033 vs 0.167).
+</text><text x="60.00px" y="521.30px" xml:space="preserve">
+</text><text x="60.00px" y="538.20px" xml:space="preserve">---
+</text><text x="60.00px" y="555.10px" xml:space="preserve">_CRITICAL=1 · WARN=1 · NOTE=1_
+</text><text x="60.00px" y="572.00px" xml:space="preserve">
+</text><text x="60.00px" y="588.90px" xml:space="preserve">$ echo $?
+</text><text x="60.00px" y="605.80px" xml:space="preserve">2
+</text>
+</g>
+<svg x="20.00px" y="20.00px"><circle cx="13.50" cy="12.00" r="5.50" fill="#FF5A54"/><circle cx="32.50" cy="12.00" r="5.50" fill="#E6BF29"/><circle cx="51.50" cy="12.00" r="5.50" fill="#52C12B"/></svg><defs><filter id="shadow" filterUnits="userSpaceOnUse"><feGaussianBlur in="SourceAlpha" stdDeviation="20.00"/><feOffset result="offsetblur" dx="0.00" dy="10.00"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>

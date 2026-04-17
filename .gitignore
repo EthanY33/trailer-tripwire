@@ -11,6 +11,11 @@ content-refs/*.mp4
 content-refs/*.webm
 content-refs/*.mkv
 
+# Demo fixture (extracted from tidewane-build history; regenerate via demo/regen.sh)
+demo/*.mp4
+demo/*.webm
+demo/*.mkv
+
 # OS
 .DS_Store
 Thumbs.db

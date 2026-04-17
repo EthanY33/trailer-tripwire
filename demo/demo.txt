@@ -1,0 +1,32 @@
+$ trailer-tripwire audit demo/bad-trailer.mp4 --ref demo/google-canvas.profile.json
+
+→ analyzing demo\bad-trailer.mp4
+
+# Trailer audit — bad-trailer.mp4
+
+- **Duration:** 60.0s
+- **Resolution:** 1920×1080 @ 25.0fps
+- **Audio:** yes | 6.7% below -50dBFS | peak -31.4dBFS
+- **Shots (scene threshold 0.15):** 3 | median 28.68s | 0.033/s
+- **Fade-based transitions:** 1/3 (50.0%)
+- **Reference:** google-canvas (60.0s, 0.167/s, fade 40.0%)
+
+## CRITICAL
+- **[fade-to-black]** 1/3 cuts (50.0%) land inside black windows — reads as slideshow. Professional editorial uses hard cuts or match cuts; fade-to-black is for chapter breaks only.
+
+## WARN
+- **[long-black]** 4 long black windows (>1.5s each) — trailer feels sparse or unfinished.
+
+## NOTE
+- **[pacing]** Median shot length is 28.68s — very static. Works if intentional (tech-launch slow holds); flags as AI-default if unintentional.
+
+## OK
+- Audio density: 6.7% silent (under -50dBFS) — filled.
+- Audio dynamics: RMS stdev 8.33 dB — expressive.
+- Pacing matches reference within ±0.2/s (0.033 vs 0.167).
+
+---
+_CRITICAL=1 · WARN=1 · NOTE=1_
+
+$ echo $?
+2

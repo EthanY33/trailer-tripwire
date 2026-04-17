@@ -4,6 +4,10 @@
 
 Catch AI-default patterns in video trailers before they ship. A pattern checker, not a taste checker.
 
+![trailer-tripwire audit output on an AI-generated trailer, flagging fade-to-black and pacing issues against the Google Canvas reference](demo/demo.svg)
+
+Auditing a real AI-slop sizzle reel (the one described in *Why this exists* below) against the Google Canvas launch film as a reference. Exit code 2, commit blocked. Regenerate with `bash demo/regen.sh`.
+
 ---
 
 ## Why this exists
