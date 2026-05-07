@@ -14,9 +14,20 @@ import { spawnSync } from 'node:child_process';
 
 const MARKER = '# trailer-tripwire:v1';
 
+/* POSIX single-quote escape: 'foo' -> 'foo', "f'oo" -> 'f'\''oo'.
+ * Single-quoted strings in bash do not expand $(...) or backticks, so this is
+ * the only safe way to embed an arbitrary --dir value into a hook body.
+ * Plain double-quotes still expand $() — JSON.stringify is not enough. */
+function shellSingleQuote(s) {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 function buildHookBody({ dir }) {
+  if (dir != null && /[\r\n\0]/.test(dir)) {
+    throw new Error('--dir may not contain newlines or null bytes');
+  }
   const checkCmd = dir
-    ? `npx trailer-tripwire check --dir ${JSON.stringify(dir)}`
+    ? `npx trailer-tripwire check --dir ${shellSingleQuote(dir)}`
     : `npx trailer-tripwire check`;
   return `#!/usr/bin/env bash
 ${MARKER}
