@@ -25,6 +25,15 @@ function resolveYtDlp() {
 /* Download a YouTube URL to `destDir` and return the final file path.
  * Picks a best <=1080p MP4 by default. Skips download if the target exists. */
 export function downloadVideo(url, destDir, { quality = 'bestvideo[height<=1080]+bestaudio/best', videoId = null } = {}) {
+  if (typeof url !== 'string' || !url) {
+    throw new Error('downloadVideo: url must be a non-empty string');
+  }
+  if (url.startsWith('-')) {
+    throw new Error(`downloadVideo: url may not start with "-" (got ${JSON.stringify(url)})`);
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(`downloadVideo: url must be http(s) (got ${JSON.stringify(url)})`);
+  }
   const bin = resolveYtDlp();
   fs.mkdirSync(destDir, { recursive: true });
 

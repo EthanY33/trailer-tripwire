@@ -12,9 +12,27 @@ import os from 'node:os';
 const FFMPEG = (await import('ffmpeg-static')).default;
 const FFPROBE = FFMPEG.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1');
 
+/* Reject paths that would be misread as flags or protocol URIs by ffmpeg/ffprobe.
+ * Windows drive letters (C:\..., D:/...) are allowed. */
+function assertSafeVideoPath(p) {
+  if (typeof p !== 'string' || !p) {
+    throw new Error('video path must be a non-empty string');
+  }
+  if (p.startsWith('-')) {
+    throw new Error(`video path may not start with "-" (got ${JSON.stringify(p)})`);
+  }
+  const protocolMatch = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(p);
+  if (protocolMatch && !/^[A-Za-z]:[\\/]/.test(p)) {
+    throw new Error(
+      `video path looks like a protocol URI, not a file path (got ${JSON.stringify(p)})`,
+    );
+  }
+}
+
 /* ─────────────────────────────────────── probe ─── */
 
 export function probe(videoPath) {
+  assertSafeVideoPath(videoPath);
   // Use system ffprobe if available, else fall back to the one alongside ffmpeg-static.
   const candidates = [FFPROBE, 'ffprobe'];
   for (const bin of candidates) {
@@ -59,6 +77,7 @@ function evalFrameRate(s) {
  * hard-cut gameplay trailers spike above 0.3. 0.15 catches both classes with
  * minimal false positives on slow pans. */
 export function detectShots(videoPath, threshold = 0.15) {
+  assertSafeVideoPath(videoPath);
   const r = spawnSync(FFMPEG, [
     '-hide_banner', '-nostats',
     '-i', videoPath,
@@ -78,6 +97,7 @@ export function detectShots(videoPath, threshold = 0.15) {
 /* Returns array of { start, end } windows where the frame is near-black.
  * d = minimum duration of dark window in seconds to count as a fade. */
 export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
+  assertSafeVideoPath(videoPath);
   const r = spawnSync(FFMPEG, [
     '-hide_banner', '-nostats',
     '-i', videoPath,
@@ -97,6 +117,7 @@ export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
 /* Extract N dominant colors from the whole video or from a time segment.
  * Returns array of #rrggbb hex strings sorted by frequency. */
 export function extractPalette(videoPath, { maxColors = 8, startSec = 0, endSec = null } = {}) {
+  assertSafeVideoPath(videoPath);
   const tmp = path.join(os.tmpdir(), `palette-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
   try {
     const trimArgs = endSec != null
@@ -162,6 +183,7 @@ export function extractPaletteOverTime(videoPath, { buckets = 6, colorsPerBucket
  * whole duration at roughly `buckets` points. silentRatio is the fraction of
  * buckets below -50 dBFS (a heuristic threshold for "silence"). */
 export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
+  assertSafeVideoPath(videoPath);
   const meta = probe(videoPath);
   if (!meta.hasAudio) return { rmsPerBucket: [], silentRatio: 1, hasAudio: false, peakDbfs: -Infinity };
 
