@@ -27,7 +27,8 @@
     "ingest": "node bin/cli.mjs ingest",
     "audit": "node bin/cli.mjs audit",
     "check": "node bin/cli.mjs check",
-    "install-hooks": "node bin/cli.mjs install-hooks"
+    "install-hooks": "node bin/cli.mjs install-hooks",
+    "test": "node --test test/audit.test.mjs"
   },
   "dependencies": {
     "ffmpeg-static": "^5.3.0"
