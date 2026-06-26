@@ -53,14 +53,14 @@ It's a tripwire against AI-default patterns. It catches the obvious stink. It do
 
 ## Install
 
-Requires Node 18+. `ffmpeg-static` is bundled. YouTube ingestion needs `yt-dlp` at `%TMP%/yt-dlp.exe` (Windows) or `/tmp/yt-dlp` (Unix). Note: this is a fixed-location lookup, not a system-PATH lookup.
+Requires Node 18+. `ffmpeg-static` is bundled. YouTube ingestion needs `yt-dlp`. It checks `yt-dlp.exe` in your temp dir first (`%TMP%/yt-dlp.exe` on Windows, `/tmp/yt-dlp.exe` on Unix), then falls back to `yt-dlp` on your system PATH.
 
 ```bash
 # Windows
 curl -sL -o %TMP%/yt-dlp.exe https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
 
-# Unix
-curl -sL -o /tmp/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && chmod +x /tmp/yt-dlp
+# Unix (installs onto your PATH)
+sudo curl -sL -o /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && sudo chmod +x /usr/local/bin/yt-dlp
 ```
 
 ### As a direct dependency
