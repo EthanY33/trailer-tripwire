@@ -15,6 +15,16 @@ tt audit <file>                                      # short alias
 
 `audit` exits 2 on any CRITICAL finding.
 
+From source (dev): `node bin/cli.mjs <command>`, or npm scripts (`npm run audit -- <file>`).
+
+## Tests
+
+```
+npm test        # node --test test/audit.test.mjs
+```
+
+Integration tests run real ffmpeg passes against `demo/bad-trailer.mp4` — slow (~30s+ per audit, 120s timeouts) and they skip-fail if the fixture is missing. They pin the bad-trailer's documented severities, so threshold changes will break them intentionally. CI: `.github/workflows/test.yml` runs the suite on ubuntu+windows x Node 18/20/22.
+
 ## Dependencies
 
 - Node 18+. `ffmpeg-static` is bundled.
@@ -25,6 +35,7 @@ tt audit <file>                                      # short alias
 | Severity | Check | Threshold |
 |---|---|---|
 | CRITICAL | fade-to-black fraction of cuts | ≥ 40% |
+| WARN | fade-to-black fraction of cuts | ≥ 20% |
 | CRITICAL | audio RMS stdev | < 3 dB |
 | WARN | long black windows (>1.5s) | > 2 |
 | WARN | audio peak dBFS | > −1 |
