@@ -151,7 +151,7 @@ trailer-tripwire check --ext mp4,webm
 
 ## How it works
 
-Everything sits on top of `ffmpeg` and `ffprobe` (resolved from the bundled `ffmpeg-static`, with a fallback to a system `ffprobe`). The analysis primitives in `src/video-analysis.mjs` shell out and parse stderr/stdout into plain numbers, so there are no native bindings to compile:
+Everything sits on top of the bundled `ffmpeg-static`. `ffmpeg-static` ships no `ffprobe`, so metadata comes from a system `ffprobe` when one is on PATH and otherwise from `ffmpeg -i`'s stream summary. The analysis primitives in `src/video-analysis.mjs` shell out and parse stderr/stdout into plain numbers, so there are no native bindings to compile:
 
 - **Shot detection** runs ffmpeg's `select='gt(scene,<threshold>)'` filter (default threshold `0.15`, calibrated so motion-graphics dissolves and hard gameplay cuts both register) and reads the `pts_time` markers.
 - **Fade detection** runs `blackdetect` and reports near-black windows; a cut is counted as fade-based when it lands inside (or at the edge of) one of those windows.

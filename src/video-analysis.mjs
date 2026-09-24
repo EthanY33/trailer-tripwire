@@ -57,7 +57,32 @@ export function probe(videoPath) {
       };
     }
   }
+  // ffmpeg-static ships no ffprobe, so without a system ffprobe (CI runners,
+  // fresh installs) read the same fields from `ffmpeg -i`'s stream summary.
+  const fromFfmpeg = probeWithFfmpeg(videoPath);
+  if (fromFfmpeg) return fromFfmpeg;
   throw new Error(`ffprobe failed on ${videoPath}`);
+}
+
+function probeWithFfmpeg(videoPath) {
+  const r = spawnSync(FFMPEG, ['-hide_banner', '-i', videoPath], { encoding: 'utf8' });
+  const text = r.stderr || '';
+  const dur = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(text);
+  if (!dur) return null;
+  const videoLine = text.split('\n').find(l => /Stream #\d+:\d+.*: Video: /.test(l)) || '';
+  const audioLine = text.split('\n').find(l => /Stream #\d+:\d+.*: Audio: /.test(l)) || '';
+  const dims = /, (\d{2,5})x(\d{2,5})[ ,]/.exec(videoLine);
+  const fps = /, ([\d.]+) fps/.exec(videoLine) || /, ([\d.]+) tbr/.exec(videoLine);
+  return {
+    durationSec: (+dur[1]) * 3600 + (+dur[2]) * 60 + parseFloat(dur[3]),
+    width: dims ? parseInt(dims[1], 10) : null,
+    height: dims ? parseInt(dims[2], 10) : null,
+    fps: fps ? parseFloat(fps[1]) : null,
+    vcodec: videoLine ? (/Video: (\w+)/.exec(videoLine) || [])[1] || null : null,
+    acodec: audioLine ? (/Audio: (\w+)/.exec(audioLine) || [])[1] || null : null,
+    hasAudio: !!audioLine,
+    sizeBytes: fs.statSync(videoPath).size,
+  };
 }
 
 function evalFrameRate(s) {
