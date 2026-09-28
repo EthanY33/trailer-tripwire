@@ -2,7 +2,7 @@
 
 # trailer-tripwire
 
-![license-mit](https://img.shields.io/badge/license-MIT-blue) ![node-18+](https://img.shields.io/badge/node-%3E%3D18-brightgreen) ![status-v0.1](https://img.shields.io/badge/status-v0.1-orange)
+![license-mit](https://img.shields.io/badge/license-MIT-blue) ![node-18+](https://img.shields.io/badge/node-%3E%3D18-brightgreen) ![status-v1.0](https://img.shields.io/badge/status-v1.0-brightgreen)
 
 Catch AI-default patterns in video trailers before they ship. A pattern checker, not a taste checker.
 

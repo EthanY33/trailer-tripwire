@@ -1,6 +1,6 @@
 {
   "name": "trailer-tripwire",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Catch AI-default patterns in video trailers before they ship. A pattern checker, not a taste checker.",
   "type": "module",
   "license": "MIT",

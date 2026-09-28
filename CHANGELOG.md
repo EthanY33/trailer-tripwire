@@ -2,6 +2,23 @@
 
 All notable changes to trailer-tripwire.
 
+## [1.0.0] - 2026-09-28
+
+First tagged release. The 0.1.0 commands and checklist are unchanged.
+
+**Security**
+
+- `install-hooks` single-quote-escapes `--dir` in the generated pre-commit hook and rejects newlines and null bytes in it.
+- Downloads accept only http(s) URLs. Video analysis rejects paths that start with `-` and protocol URIs.
+
+**Fixed**
+
+- Metadata probing works when no ffprobe is installed: it reads the stream summary from `ffmpeg -i` instead.
+
+**Tests**
+
+- Integration tests run real ffmpeg audits. When `demo/bad-trailer.mp4` is absent they synthesize a slideshow fixture with the bundled ffmpeg. CI runs on Ubuntu and Windows with Node 18, 20 and 22.
+
 ## [0.1.0] — initial release
 
 Catch AI-default patterns in video trailers before they ship.

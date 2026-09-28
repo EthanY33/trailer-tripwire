@@ -1,6 +1,6 @@
 # trailer-tripwire
 
-Node 18+ CLI, MIT, v0.1.0. Catches AI-default patterns in video trailers so AI-slop fails the build before reaching Steam. Eldest of the tripwire siblings (`screenshot-tripwire`, `copy-tripwire`).
+Node 18+ CLI, MIT, v1.0.0. Catches AI-default patterns in video trailers so AI-slop fails the build before reaching Steam. Eldest of the tripwire siblings (`screenshot-tripwire`, `copy-tripwire`).
 
 ## Commands
 ```
