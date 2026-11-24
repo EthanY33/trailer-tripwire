@@ -130,7 +130,17 @@ trailer-tripwire install-hooks
 trailer-tripwire install-hooks --dir brand/trailers/
 ```
 
-After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked. The hook is marked `# trailer-tripwire:v1` and is idempotent: it replaces its own previous version but refuses to clobber an unrelated pre-commit hook.
+After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked.
+
+The installer owns one block in the pre-commit hook and nothing else:
+
+```sh
+# trailer-tripwire:v1
+npx --no -- trailer-tripwire check --dir 'brand/trailers/' || exit $?
+# trailer-tripwire:v1 end
+```
+
+Running `install-hooks` again (for example to change `--dir`) rewrites only the lines between those two markers. Lines you wrote yourself and the blocks of `screenshot-tripwire` and `copy-tripwire` are left as they are, in any install order. A hook written by an older version of any of the three is converted to this block format with every gate it had. A pre-commit hook that has nothing to do with the tripwires is never modified: the installer exits 1 and prints the block so you can paste it in by hand.
 
 The hook runs the check through `npx --no`, so it only ever runs a `trailer-tripwire` that is already installed. If the package is missing (a fresh `git worktree`, a deleted `node_modules`), the commit fails instead of npx downloading a package by that name from the npm registry. Install it, or bypass that one commit.
 
