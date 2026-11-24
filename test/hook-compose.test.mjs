@@ -369,7 +369,6 @@ for (const self of TRIPWIRES) {
       `npx --no-install ${self} check`,
       `npx --no -- ${self} check || exit $?`,
       `npx ${self} check --dir "old/" || exit 1`,
-      `  npx ${self} check --ext mp4,webm || exit`,
     ]) {
       const r = composeHook(`#!/bin/sh\nnpm run lint\n${legacy}\n`, self, selfArgs);
       assert.equal(r.action, "appended", legacy);
@@ -390,6 +389,7 @@ for (const self of TRIPWIRES) {
       `npx ${self} checkout`,
       `npx --yes ${self} check`,
       `if ! npx ${self} check; then exit 1; fi`,
+      `  npx ${self} check --ext mp4,webm || exit`,
     ]) {
       // With its marker present the file is known to be ours to extend, but
       // the hand-written line itself must survive untouched.
@@ -502,6 +502,40 @@ for (const self of TRIPWIRES) {
     assert.match(r.warnings[0], /^line 4 starts with "exec"/);
     assert.match(r.warnings[0], /never run/);
     assert.ok(r.warnings[0].includes(self));
+  });
+
+  test(`${self}: warns when the appended block lands below an unconditional exit`, () => {
+    const before = `#!/bin/sh\n# ${self}:v1\nnpm run lint || exit 1\nnpx ${self} check || exit 1\nexit 0\n`;
+    const r = composeHook(before, self, selfArgs);
+    assert.equal(r.action, "appended");
+    assert.equal(r.warnings.length, 1);
+    assert.match(r.warnings[0], /^line 3 is an unconditional "exit"/);
+    assert.match(r.warnings[0], /never run/);
+  });
+
+  test(`${self}: a conditional exit and an exit inside a sibling block do not warn`, () => {
+    const cond = `#!/bin/sh\nif [ -n "$SKIP" ]; then\n  exit 0\nfi\nnpx ${self} check\n`;
+    const r = composeHook(cond, self, selfArgs);
+    assert.equal(r.action, "appended");
+    assert.deepEqual(r.warnings, []);
+    const sibling = `# ${sibA}:v1\nexit 0\n# ${sibA}:v1 end`;
+    const r2 = composeHook(`#!/bin/sh\nnpm run lint\n${sibling}\n`, self, selfArgs);
+    assert.equal(r2.action, "appended");
+    assert.deepEqual(r2.warnings, []);
+  });
+
+  test(`${self}: an indented own command inside an if is kept and warned about`, () => {
+    const body = `if command -v npx >/dev/null; then\n  npx ${self} check\nfi\nnpm test\n`;
+    const marked = `#!/bin/sh\n# ${self}:v1\n${body}`;
+    const r = composeHook(marked, self, selfArgs);
+    assert.equal(r.action, "appended");
+    assert.equal(r.text, `#!/bin/sh\n${body}\n${own}\n`);
+    assert.equal(r.warnings.length, 1);
+    assert.match(r.warnings[0], /^line 3 runs /);
+    const bare = `#!/bin/sh\n${body}`;
+    const refused = composeHook(bare, self, selfArgs);
+    assert.equal(refused.action, "refused");
+    assert.equal(refused.text, bare);
   });
 
   test(`${self}: its own removed exec line and exec inside a sibling block do not warn`, () => {

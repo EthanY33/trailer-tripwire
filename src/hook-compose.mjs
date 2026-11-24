@@ -40,10 +40,11 @@
  *     nothing of SELF: append the SELF block.
  *  6. No tripwire marker or command at all: refuse and leave the file alone.
  *
- * A command line counts as a tripwire command only when nothing but plain
- * arguments follows `check` (and an optional `|| exit`, `|| exit $?` or
- * `|| exit <nonzero>`). A line that chains, pipes or redirects anything is
- * hand-written and is never removed or rewritten.
+ * A command line counts as a tripwire command only when it starts at column 0
+ * and nothing but plain arguments follows `check` (and an optional
+ * `|| exit`, `|| exit $?` or `|| exit <nonzero>`). An indented line (the body
+ * of an if, a function or a loop) and a line that chains, pipes or redirects
+ * anything is hand-written and is never removed or rewritten.
  */
 
 export const TRIPWIRES = Object.freeze(['screenshot-tripwire', 'trailer-tripwire', 'copy-tripwire']);
@@ -63,6 +64,7 @@ const COMMAND_RE = new RegExp(
 );
 const EXIT_SUFFIX_RE = /(?:^|\s)\|\|\s*exit(?:\s+(?:\$\?|[1-9][0-9]*))?$/;
 const EXEC_RE = /^\s*exec\s/;
+const EXIT_RE = /^exit(?:\s|$)/;
 
 function beginMarker(name) {
   return `# ${name}:v1`;
@@ -153,7 +155,7 @@ function classify(raw) {
   }
   if (trimmed.startsWith('#')) return { raw, kind: 'comment' };
   if (trimmed === 'set -e') return { raw, kind: 'set-e' };
-  const command = parseCommand(trimmed);
+  const command = /^\s/.test(raw) ? null : parseCommand(trimmed);
   if (command) return { raw, kind: 'command', name: command.name, args: command.args };
   return { raw, kind: 'other' };
 }
@@ -252,11 +254,26 @@ export function composeHook(existing, self, selfArgs) {
   const kept = lines.filter((line) => !isSelfLegacy(line));
   const warnings = [];
   kept.forEach((line, index) => {
-    if (!line.block && EXEC_RE.test(line.raw)) {
+    if (line.block) return;
+    if (EXEC_RE.test(line.raw)) {
       warnings.push(
         `line ${index + 1} starts with "exec": lines after an exec never run, ` +
           `so the ${self} block appended below it will not run. ` +
           'Move the block above that line.',
+      );
+    }
+    if (EXIT_RE.test(line.raw)) {
+      warnings.push(
+        `line ${index + 1} is an unconditional "exit": lines after it never run, ` +
+          `so the ${self} block appended below it will not run. ` +
+          'Move the block above that line.',
+      );
+    }
+    if (/^\s/.test(line.raw) && parseCommand(line.raw.trim())?.name === self) {
+      warnings.push(
+        `line ${index + 1} runs ${self} from inside a hand-written statement, ` +
+          'so it was left in place: it still calls npx without --no and the gate now runs twice. ' +
+          'Replace or delete it by hand.',
       );
     }
   });

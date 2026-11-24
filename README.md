@@ -144,6 +144,8 @@ Running `install-hooks` again (for example to change `--dir`) rewrites only the 
 
 The hook runs the check through `npx --no`, so it only ever runs a `trailer-tripwire` that is already installed. If the package is missing (a fresh `git worktree`, a deleted `node_modules`), the commit fails instead of npx downloading a package by that name from the npm registry. Install it, or bypass that one commit.
 
+In a hand-written hook the block is appended at the end, so a hook that ends in `exit` or `exec` needs the block moved above that line (the installer warns). An indented `trailer-tripwire` command inside an `if` or a function is left alone, with a warning.
+
 Bypass: `git commit --no-verify` (standard git).
 
 ### Run the check manually

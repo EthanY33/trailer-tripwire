@@ -273,6 +273,17 @@ test("a block appended below an exec line comes with a warning", () => {
   assert.match(result.stderr, /never run/);
 });
 
+test("a block appended below an unconditional exit comes with a warning", () => {
+  const repo = makeRepo();
+  writeHook(repo, "#!/bin/sh\n# copy-tripwire:v1\nnpm run lint || exit 1\nnpx copy-tripwire check || exit 1\nexit 0\n");
+
+  const result = install({ cwd: repo });
+  assert.equal(result.ok, true);
+  assert.equal(result.action, "appended");
+  assert.match(result.stderr, /unconditional "exit"/);
+  assert.match(result.stderr, /never run/);
+});
+
 test("a relative core.hooksPath is honoured, also from a subdirectory", () => {
   const repo = makeRepo();
   git(repo, "config", "core.hooksPath", ".githooks");
