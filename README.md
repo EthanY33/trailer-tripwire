@@ -132,6 +132,8 @@ trailer-tripwire install-hooks --dir brand/trailers/
 
 After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked. The hook is marked `# trailer-tripwire:v1` and is idempotent: it replaces its own previous version but refuses to clobber an unrelated pre-commit hook.
 
+The hook runs the check through `npx --no`, so it only ever runs a `trailer-tripwire` that is already installed. If the package is missing (a fresh `git worktree`, a deleted `node_modules`), the commit fails instead of npx downloading a package by that name from the npm registry. Install it, or bypass that one commit.
+
 Bypass: `git commit --no-verify` (standard git).
 
 ### Run the check manually

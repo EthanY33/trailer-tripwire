@@ -26,9 +26,11 @@ function buildHookBody({ dir }) {
   if (dir != null && /[\r\n\0]/.test(dir)) {
     throw new Error('--dir may not contain newlines or null bytes');
   }
+  // `--no` makes npx fail when trailer-tripwire is not installed, instead of
+  // downloading whatever the npm registry serves under that name.
   const checkCmd = dir
-    ? `npx trailer-tripwire check --dir ${shellSingleQuote(dir)}`
-    : `npx trailer-tripwire check`;
+    ? `npx --no -- trailer-tripwire check --dir ${shellSingleQuote(dir)}`
+    : `npx --no -- trailer-tripwire check`;
   return `#!/usr/bin/env bash
 ${MARKER}
 # Auto-installed by: trailer-tripwire install-hooks

@@ -10,7 +10,7 @@ trailer-tripwire check [--dir <prefix>] [--ext mp4]   # scan staged
 trailer-tripwire install-hooks [--dir <prefix>]       # pre-commit gate
 tt audit <file>                                       # short alias
 node bin/cli.mjs <command>                            # from source; or npm run audit -- <file>
-npm test                                              # node --test test/audit.test.mjs
+npm test                                              # node --test on the test/*.test.mjs files listed in package.json
 ```
 - Integration tests run real ffmpeg on `demo/bad-trailer.mp4` (gitignored): slow (~30s+ per audit, 120s timeouts), and pin its documented severities, so threshold changes break them intentionally. Where the fixture is missing (CI, fresh clones) they synthesize a black-gap color slideshow with the bundled ffmpeg instead. CI (`.github/workflows/test.yml`): ubuntu+windows x Node 18/20/22.
 - `ffmpeg-static` is bundled (ffmpeg only; `probe()` uses a system ffprobe if present, else parses `ffmpeg -i`). `yt-dlp` is needed for YouTube ingest only: looks for `<tmpdir>/yt-dlp.exe` first (`os.tmpdir()`, always the `.exe` name even off Windows, a code quirk), then `yt-dlp` on PATH.
@@ -23,7 +23,7 @@ npm test                                              # node --test test/audit.t
 Calibrated to corporate-launch aesthetic (Google Canvas, Gemini era, NVIDIA OpenClaw). Action / music-video / art-film vibes misfire: fork and tune, don't tighten in main.
 
 ## Pre-commit hook contract (load-bearing)
-Marker `# trailer-tripwire:v1`, written to `.git/hooks/pre-commit` by `src/install-hooks.mjs`. Idempotent for itself but not sibling-aware: refuses on an unrelated hook (merge by hand); on a hook already carrying this marker it overwrites the whole file solo, even if `copy-tripwire`/`screenshot-tripwire` had composed onto it. Composition is one-directional (the siblings' installers detect this marker and compose around it), so install trailer-tripwire's hook first. Don't reword or drop the marker line: siblings grep for it verbatim.
+Marker `# trailer-tripwire:v1`, written to `.git/hooks/pre-commit` by `src/install-hooks.mjs`. Idempotent for itself but not sibling-aware: refuses on an unrelated hook (merge by hand); on a hook already carrying this marker it overwrites the whole file solo, even if `copy-tripwire`/`screenshot-tripwire` had composed onto it. Composition is one-directional (the siblings' installers detect this marker and compose around it), so install trailer-tripwire's hook first. Don't reword or drop the marker line: siblings grep for it verbatim. The hook calls `npx --no -- trailer-tripwire check`: `--no` makes npx fail instead of downloading a missing package from the registry, so keep it.
 
 ## Known limitations (accepted, don't "fix")
 - Procedural audio with sharp SFX accents (UI ticks, explosions) passes the RMS-stdev check.
