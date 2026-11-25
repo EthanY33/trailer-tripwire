@@ -284,6 +284,25 @@ test("FFMPEG_BIN given as a program name on PATH is not reported as missing", ()
   assert.equal(r.status, 2, out);
 });
 
+test("a staged blob is read through the smudge filter", { timeout: TIMEOUT }, () => {
+  // Stand-in for Git LFS: the staged blob is a pointer and a smudge filter
+  // turns it back into the real video. Reading the raw blob would find
+  // garbage and the commit would be blocked as unauditable.
+  const repo = makeRepo();
+  const real = git(repo, "hash-object", "-w", "--", SLIDESHOW);
+  put(repo, ".gitattributes", Buffer.from("*.mp4 filter=tt\n"));
+  git(repo, "add", "--", ".gitattributes");
+  git(repo, "config", "filter.tt.smudge", `git cat-file blob ${real}`);
+  git(repo, "config", "filter.tt.required", "true");
+  const pointer = spawnSync("git", ["hash-object", "-w", "--stdin"],
+    { cwd: repo, input: "pointer\n", encoding: "utf8" }).stdout.trim();
+  git(repo, "update-index", "--add", "--cacheinfo", `100644,${pointer},brand/trailers/lfs.mp4`);
+
+  const r = check({ cwd: repo });
+  assert.equal(r.exitCode, 1, r.out);
+  assert.equal(r.blocked, 1, r.out);
+});
+
 test("check blocks with a reason when it cannot create its temp directory", () => {
   const repo = makeRepo();
   stage(repo, "clip.mp4", GARBAGE);
