@@ -256,3 +256,69 @@ test("check fails with a reason outside a git repository", () => {
   assert.equal(r.exitCode, 2, r.out);
   assert.match(r.out, /^trailer-tripwire: not inside a git repository$/);
 });
+
+// The staged paths a run tried to audit. The files in these tests hold
+// garbage, so each one in scope shows up as "could not be audited".
+function audited(opts) {
+  const r = check(opts);
+  return [...r.out.matchAll(/^ {2}! (.+?): could not be audited/gm)].map((m) => m[1]).sort();
+}
+
+test("--dir is matched as a directory, however it is spelled", () => {
+  const repo = makeRepo();
+  stage(repo, "brand/trailers/a.mp4", GARBAGE);
+  stage(repo, "brand/trailers-raw/b.mp4", GARBAGE);
+  stage(repo, "other/c.mp4", GARBAGE);
+  const abs = path.join(repo, "brand", "trailers");
+  const BS = String.fromCharCode(92); // a backslash, as typed in cmd.exe or PowerShell
+
+  for (const dir of [
+    "brand/trailers/",
+    "brand/trailers",
+    "./brand/trailers/",
+    "./brand/trailers",
+    "brand//trailers/",
+    `brand${BS}trailers${BS}`,
+    `.${BS}brand${BS}trailers`,
+    abs,
+    abs + path.sep,
+  ]) {
+    assert.deepEqual(audited({ cwd: repo, dir }), ["brand/trailers/a.mp4"], `--dir ${dir}`);
+  }
+
+  // A relative --dir is relative to the repository root, not to the current directory.
+  assert.deepEqual(audited({ cwd: path.join(repo, "other"), dir: "brand/trailers" }), ["brand/trailers/a.mp4"]);
+
+  // The repository root itself is no restriction.
+  const all = ["brand/trailers-raw/b.mp4", "brand/trailers/a.mp4", "other/c.mp4"];
+  for (const dir of [".", "./", repo]) {
+    assert.deepEqual(audited({ cwd: repo, dir }), all, `--dir ${dir}`);
+  }
+});
+
+test("--dir outside the repository is an error, not a scope that never matches", () => {
+  const repo = makeRepo();
+  stage(repo, "brand/trailers/a.mp4", GARBAGE);
+
+  for (const dir of [ROOT, "../elsewhere/"]) {
+    const r = check({ cwd: repo, dir });
+    assert.equal(r.exitCode, 2, `--dir ${dir}: ${r.out}`);
+    assert.match(r.out, /^trailer-tripwire: --dir .* is outside the repository/, `--dir ${dir}`);
+  }
+});
+
+test("a run with no staged video in scope prints one skipping line and exits 0", () => {
+  const repo = makeRepo();
+  assert.equal(check({ cwd: repo }).out, "trailer-tripwire: no staged video files - skipping");
+
+  stage(repo, "README.md", Buffer.from("notes\n"));
+  stage(repo, "gameplay/clip.mp4", GARBAGE);
+
+  const scoped = check({ cwd: repo, dir: "./brand/trailers" });
+  assert.equal(scoped.exitCode, 0, scoped.out);
+  assert.equal(scoped.out, "trailer-tripwire: no staged video files under brand/trailers/ - skipping");
+
+  const otherExt = check({ cwd: repo, ext: ["webm"] });
+  assert.equal(otherExt.exitCode, 0, otherExt.out);
+  assert.equal(otherExt.out, "trailer-tripwire: no staged video files - skipping");
+});

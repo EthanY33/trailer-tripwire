@@ -1,7 +1,7 @@
 /* Install a git pre-commit hook that runs `trailer-tripwire check`.
  *
  * Usage (via CLI):
- *   trailer-tripwire install-hooks [--dir <path-prefix>]
+ *   trailer-tripwire install-hooks [--dir <dir>]
  *
  * Thin wrapper: resolve the hook path (honours core.hooksPath and linked
  * worktrees), read the file, let composeHook() decide, write, report. What

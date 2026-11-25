@@ -6,8 +6,8 @@ Node 18+ CLI, MIT, v1.0.0. Catches AI-default patterns in video trailers so AI-s
 ```
 trailer-tripwire ingest <url-or-path> --name <ref>    # reference profile JSON
 trailer-tripwire audit <file> [--ref <profile.json>]  # absolute checklist (+ delta vs reference); exit 2 on any CRITICAL
-trailer-tripwire check [--dir <prefix>] [--ext mp4]   # scan staged; exit 1 on CRITICAL, 2 if a video could not be audited
-trailer-tripwire install-hooks [--dir <prefix>]       # pre-commit gate
+trailer-tripwire check [--dir <dir>] [--ext mp4]      # scan staged; exit 1 on CRITICAL, 2 if a video could not be audited
+trailer-tripwire install-hooks [--dir <dir>]          # pre-commit gate
 tt audit <file>                                       # short alias
 node bin/cli.mjs <command>                            # from source; or npm run audit -- <file>
 npm test                                              # node --test on the test/*.test.mjs files listed in package.json
@@ -29,6 +29,9 @@ Calibrated to corporate-launch aesthetic (Google Canvas, Gemini era, NVIDIA Open
 - Any install order and any number of re-runs must leave every gate and every hand-written line in place. `test/hook-compose.test.mjs` proves that for all three tool names, `test/install-hooks.test.mjs` against real git (core.hooksPath, linked worktree, a commit through the hook).
 
 ## `check` contract (load-bearing, same rules as the siblings' `check`)
+`src/check-staged.mjs`; `test/check-staged.test.mjs` proves each rule against real git with synthesized videos.
+- Staged names come from `git diff --cached --name-only -z --diff-filter=ACMR`, split on NUL. Never parse the quoted (non `-z`) form; `R` is what keeps a video moved into scope with `git mv` audited.
+- `--dir` is a directory relative to the repo root (an absolute path inside the repo also works), compared after normalising: backslashes to `/`, no leading `./`, one trailing `/`. So `brand/trailers` does not match `brand/trailers-raw/`. Outside the repo is exit 2. Zero staged videos in scope prints one `skipping` line and exits 0.
 - Runs every git command from `git rev-parse --show-toplevel`, so it works from a subdirectory. Audits the staged blob, never the working tree file: `git cat-file --filters :0:<path>` (raw `blob` as fallback) written to a temp file under `os.tmpdir()` that keeps the extension and is deleted in a `finally`.
 - Fails closed. Exit 1 = CRITICAL findings (wins when both apply). Exit 2 = something could not be audited: unreadable blob, an `audit()` throw (corrupt or durationless video), missing ffmpeg binary (`ffmpeg-static` fetches it in an install script, so `--ignore-scripts` installs have none), git failure or a git child killed by a signal. Never return 0 for a video that was not audited; `bin/cli.mjs` maps a missing exit code to 1.
 

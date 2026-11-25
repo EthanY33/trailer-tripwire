@@ -4,8 +4,8 @@
  * Subcommands:
  *   ingest <url-or-path> [--name <slug>] [--out <dir>] [--threshold <n>]
  *   audit  <video> [--ref <profile.json>] [--out <report.md>]
- *   check  [--dir <prefix>] [--ext mp4,webm,mov,mkv]
- *   install-hooks [--dir <prefix>]
+ *   check  [--dir <dir>] [--ext mp4,webm,mov,mkv]
+ *   install-hooks [--dir <dir>]
  *   help
  */
 
@@ -46,14 +46,15 @@ Commands:
       Evaluate a video against absolute thresholds + optional reference.
       Exits 2 if any CRITICAL findings, 0 otherwise.
 
-  check [--dir <prefix>] [--ext mp4,webm,mov,mkv]
+  check [--dir <dir>] [--ext mp4,webm,mov,mkv]
       Audit any video files in the git staged set. Used as a pre-commit
       gate. Exits 1 if any CRITICAL findings, 2 if a staged video could
-      not be audited.
+      not be audited. --dir limits the scan to one directory, given
+      relative to the repository root.
 
-  install-hooks [--dir <prefix>]
+  install-hooks [--dir <dir>]
       Install a pre-commit hook that runs \`check\` on every commit.
-      --dir scopes the check to files under that path prefix.
+      --dir scopes the check to staged files under that directory.
 
 Examples:
   trailer-tripwire ingest https://youtube.com/watch?v=abc --name corporate-launch

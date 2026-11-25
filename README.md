@@ -126,7 +126,7 @@ Exit codes: `0` if no CRITICAL findings, `2` if any. Pipe into CI or wrap in a s
 # Install the hook in the current repo
 trailer-tripwire install-hooks
 
-# Scope it to a specific directory prefix (recommended, avoids false-positives on gameplay clips, screen recordings, etc.)
+# Scope it to one directory (recommended, avoids false-positives on gameplay clips, screen recordings, etc.)
 trailer-tripwire install-hooks --dir brand/trailers/
 ```
 
@@ -154,14 +154,16 @@ Bypass: `git commit --no-verify` (standard git).
 # Scan all staged videos (default extensions: mp4, webm, mov, mkv)
 trailer-tripwire check
 
-# Scope to a path
+# Scope to one directory
 trailer-tripwire check --dir brand/trailers/
 
 # Custom extensions
 trailer-tripwire check --ext mp4,webm
 ```
 
-Exit codes: `0` if every staged video passes (or none is staged), `1` if any has CRITICAL findings, `2` if a staged video could not be audited or git failed.
+`--dir` names a directory relative to the repository root, whatever directory you run the check from. `brand/trailers`, `brand/trailers/` and `./brand/trailers/` are the same scope, and none of them covers `brand/trailers-raw/`. An absolute path works if it is inside the repository. When no staged video is in scope, the check prints one `skipping` line and exits `0`.
+
+Exit codes: `0` if every staged video passes (or none is staged), `1` if any has CRITICAL findings, `2` if a staged video could not be audited, `--dir` points outside the repository, or git failed.
 
 ---
 

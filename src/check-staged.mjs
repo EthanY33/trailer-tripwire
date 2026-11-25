@@ -4,10 +4,13 @@
  * audited (unreadable or corrupt content, missing ffmpeg, git failure).
  *
  * Usage (via CLI):
- *   trailer-tripwire check [--dir <path-prefix>] [--ext mp4,webm,mov,mkv]
+ *   trailer-tripwire check [--dir <dir>] [--ext mp4,webm,mov,mkv]
  *
- * `--dir` restricts to files whose path (forward-slashed) starts with the
- * given prefix. Default: no restriction — scans all staged videos.
+ * `--dir` restricts the scan to one directory, given relative to the
+ * repository root (an absolute path inside the repository works too).
+ * `brand/trailers`, `brand/trailers/` and `./brand/trailers/` are the same
+ * scope, and none of them covers `brand/trailers-raw/`. Default: no
+ * restriction, all staged videos are scanned.
  *
  * What is audited is the staged content (the blob in the index), because that
  * is what the commit records. The working tree file is never read. Every git
@@ -40,6 +43,29 @@ function gitFailure(r) {
 function oneLine(message) {
   const flat = String(message).replace(/\s+/g, ' ').trim();
   return flat.length > 300 ? `${flat.slice(0, 297)}...` : flat;
+}
+
+function realPath(p) {
+  try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
+}
+
+/* Turn `--dir` into the form staged names are compared with: forward
+ * slashes, no leading `./`, exactly one trailing slash. Returns '' for the
+ * repository root (no restriction) and null for a directory outside the
+ * repository, which could never match a staged name. */
+function scopeOf(dir, root) {
+  let d = String(dir);
+  if (path.isAbsolute(d)) {
+    // Compare resolved paths first, so a symlinked or 8.3 spelling of the
+    // root still counts as inside. Fall back to the paths as given.
+    const candidates = [[realPath(root), realPath(d)], [path.resolve(root), path.resolve(d)]]
+      .map(([from, to]) => path.relative(from, to));
+    d = candidates.find(rel => !path.isAbsolute(rel) && rel.split(path.sep)[0] !== '..') ?? '..';
+  }
+  d = path.posix.normalize(d.replace(/\\/g, '/')).replace(/\/+$/, '');
+  if (d === '' || d === '.') return '';
+  if (d === '..' || d.startsWith('../')) return null;
+  return `${d}/`;
 }
 
 // The gate fails closed: a video it could not look at is never waved through.
@@ -85,6 +111,12 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
   }
   const root = top.stdout.replace(/\r?\n$/, '');
 
+  const scope = dir ? scopeOf(dir, root) : '';
+  if (scope === null) {
+    console.error(`trailer-tripwire: --dir ${dir} is outside the repository (${root}), so it can never match a staged file.`);
+    return { exitCode: 2 };
+  }
+
   // -z: NUL-separated raw names. The default output C-quotes any name with
   // a non-ASCII byte, a quote or a backslash, and a quoted name no longer
   // ends in its extension. ACMR: a rename or copy is listed under its new
@@ -101,11 +133,14 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
   const trailers = staged.filter(f => {
     const fwd = f.replace(/\\/g, '/');
     if (!extRe.test(fwd)) return false;
-    if (dir && !fwd.startsWith(dir.replace(/\\/g, '/'))) return false;
+    if (scope && !fwd.startsWith(scope)) return false;
     return true;
   });
 
-  if (!trailers.length) return { exitCode: 0 };
+  if (!trailers.length) {
+    console.log(`trailer-tripwire: no staged video files${scope ? ` under ${scope}` : ''} - skipping`);
+    return { exitCode: 0 };
+  }
 
   // ffmpeg-static downloads its binary in an install script, so an install
   // with scripts disabled leaves the package without one. Say that once,
