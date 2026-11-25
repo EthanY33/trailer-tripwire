@@ -21,11 +21,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { audit } from "../src/audit.mjs";
+import { ingest } from "../src/ingest.mjs";
 import { detectShots, detectFades, extractPalette } from "../src/video-analysis.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO = path.resolve(__dirname, "..");
+const CLI = path.join(REPO, "bin", "cli.mjs");
 const BAD_TRAILER = path.join(REPO, "demo", "bad-trailer.mp4");
 const REF_PROFILE = path.join(REPO, "demo", "google-canvas.profile.json");
 
@@ -52,6 +54,8 @@ async function synthesizeSlideshow() {
 }
 
 const FIXTURE = HAS_FIXTURE ? BAD_TRAILER : await synthesizeSlideshow();
+// The small synthesized clip, for the tests that run more than an audit on it.
+const SLIDESHOW = HAS_FIXTURE ? await synthesizeSlideshow() : FIXTURE;
 
 // One audit pass can take ~30s with ffmpeg-static on a cold runner.
 const TIMEOUT = 120_000;
@@ -225,3 +229,85 @@ test("detectFades() and extractPalette() refuse filter options that are not numb
     /maxColors must be a finite number/,
   );
 });
+
+test("detectShots() and detectFades() throw when ffmpeg fails instead of finding nothing", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "tt-test-"));
+  try {
+    const notVideo = path.join(dir, "not-a-video.mp4");
+    await writeFile(notVideo, "this is not a video");
+    assert.throws(() => detectShots(notVideo), /shot detection: ffmpeg exited with status/);
+    assert.throws(() => detectFades(notVideo), /fade detection: ffmpeg exited with status/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// `ingest --threshold abc` parses to NaN. ffmpeg accepts gt(scene,NaN) and
+// selects nothing, and JSON writes NaN as null, so the profile used to come
+// out with no cuts and a null sceneThreshold, exit 0.
+test(
+  "ingest() refuses a threshold that is not a number between 0 and 1 and writes nothing",
+  { timeout: TIMEOUT },
+  async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tt-test-"));
+    try {
+      const out = path.join(dir, "refs");
+      for (const bad of [NaN, 0, 1, -0.15, "0.15", null]) {
+        await assert.rejects(
+          ingest({ input: FIXTURE, name: "r", outDir: out, threshold: bad }),
+          /--threshold must be a number between 0 and 1/,
+          `threshold ${String(bad)} must be refused`,
+        );
+      }
+      await assert.rejects(stat(out), "a refused threshold must not leave an output directory");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "the CLI fails `ingest --threshold abc` without writing a profile",
+  { timeout: TIMEOUT },
+  async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tt-test-"));
+    try {
+      const out = path.join(dir, "refs");
+      const r = spawnSync(
+        process.execPath,
+        [CLI, "ingest", FIXTURE, "--name", "r", "--out", out, "--threshold", "abc"],
+        { encoding: "utf8" },
+      );
+      assert.equal(r.status, 2, `expected exit 2, got ${r.status}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /--threshold must be a number between 0 and 1 \(got NaN\)/);
+      await assert.rejects(stat(path.join(out, "r.profile.json")), "no profile may be written");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "the CLI ingests with an in-range --threshold and audit() accepts the profile it wrote",
+  { timeout: TIMEOUT },
+  async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tt-test-"));
+    try {
+      const out = path.join(dir, "refs");
+      const r = spawnSync(
+        process.execPath,
+        [CLI, "ingest", SLIDESHOW, "--name", "r", "--out", out, "--threshold", "0.3"],
+        { encoding: "utf8" },
+      );
+      assert.equal(r.status, 0, `ingest failed: ${r.stdout}${r.stderr}`);
+      const refPath = path.join(out, "r.profile.json");
+      const profile = JSON.parse(await readFile(refPath, "utf8"));
+      assert.equal(profile.shots.sceneThreshold, 0.3);
+      assert.ok(profile.shots.cuts.length > 0, "the slideshow's cuts must be in the profile");
+      const result = audit({ videoPath: SLIDESHOW, refPath, verbose: false });
+      assert.match(result.report, /scene threshold 0\.3/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);

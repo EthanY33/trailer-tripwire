@@ -197,7 +197,7 @@ Three calibration moves:
 ## Known limitations
 
 - **Procedural audio with accents passes the flat-drone check.** If your "procedural" audio includes sharp SFX hits (explosions, UI ticks), the RMS stdev reads as 8+ dB even though the underlying bed is a sine wave. The check catches pure drones, not drone plus accent.
-- **Scene detection misses dissolves on same-framed content.** If two shots are cut together but have similar composition and motion, ffmpeg's scene filter may not trigger. Lower `--threshold` in `ingest` catches more, at the cost of more false positives on camera pans.
+- **Scene detection misses dissolves on same-framed content.** If two shots are cut together but have similar composition and motion, ffmpeg's scene filter may not trigger. Lower `--threshold` in `ingest` (a number between 0 and 1, default `0.15`; anything else is refused and no profile is written) catches more, at the cost of more false positives on camera pans.
 - **Palette hue detection is coarse.** It buckets by the leading hex digits of each color. It can't distinguish teal from navy; it can distinguish red from green.
 - **YouTube downloads require yt-dlp.** The `ingest` command shells out to `yt-dlp`, which is maintained separately. If YouTube breaks the API surface, you'll need to update your yt-dlp binary.
 
