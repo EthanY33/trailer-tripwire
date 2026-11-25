@@ -124,8 +124,9 @@ test("a staged video whose name git would C-quote is audited, not skipped", { ti
   // "e" with an acute accent, built from its code point so this file stays ASCII.
   const name = `brand/trailers/trailer-${String.fromCodePoint(0xe9)}.mp4`;
   stage(repo, name, SLIDESHOW);
-  // Without -z git prints this name quoted, with octal escapes.
-  assert.match(git(repo, "diff", "--cached", "--name-only"), /^"brand\/trailers\/trailer-\\303\\251\.mp4"$/);
+  // Without -z git prints this name quoted, with octal escapes, so it ends
+  // in a double quote and not in ".mp4".
+  assert.match(git(repo, "diff", "--cached", "--name-only"), /^"brand\/trailers\/trailer-.+\.mp4"$/);
 
   // A second quoted name (two CJK characters and a space) with content that
   // cannot be audited: both are reported, and CRITICAL decides the exit code.
@@ -248,6 +249,23 @@ test("a missing ffmpeg binary blocks a known-CRITICAL video with one clear reaso
   assert.ok(r.out.includes(missing), r.out);
   assert.match(r.out, /1 staged video file\(s\) could not be audited, commit blocked/);
   assert.doesNotMatch(r.out, /Cannot read properties/);
+});
+
+test("FFMPEG_BIN given as a program name on PATH is not reported as missing", () => {
+  const repo = makeRepo();
+  stage(repo, "clip.mp4", GARBAGE);
+
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.toUpperCase() !== "PATH") env[k] = v;
+  }
+  env.PATH = path.dirname(FFMPEG) + path.delimiter + process.env.PATH;
+  env.FFMPEG_BIN = "ffmpeg";
+  const r = spawnSync(process.execPath, [CLI, "check"], { cwd: repo, encoding: "utf8", env });
+  const out = `${r.stdout}${r.stderr}`;
+  assert.doesNotMatch(out, /ffmpeg binary is missing/);
+  assert.match(out, /clip\.mp4: could not be audited/);
+  assert.equal(r.status, 2, out);
 });
 
 test("check blocks with a reason when it cannot create its temp directory", () => {

@@ -155,8 +155,9 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
 
   // ffmpeg-static downloads its binary in an install script, so an install
   // with scripts disabled leaves the package without one. Say that once,
-  // instead of one obscure error per file.
-  if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+  // instead of one obscure error per file. (FFMPEG_BIN may hold a program
+  // name instead of a path; that is left to the PATH lookup.)
+  if (!ffmpegPath || (/[\\/]/.test(ffmpegPath) && !fs.existsSync(ffmpegPath))) {
     const where = ffmpegPath || 'ffmpeg-static has no build for this platform';
     console.error(`trailer-tripwire: the ffmpeg binary is missing (${where}). Try \`npm rebuild ffmpeg-static\`.`);
     return notAudited(trailers.length);
