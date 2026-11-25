@@ -53,6 +53,28 @@ function assertSafeVideoPath(p) {
   }
 }
 
+/* Numbers that are written into an ffmpeg filtergraph string. A filtergraph
+ * is a language of its own (other filters write files and open URLs), so only
+ * a plain number may reach it. A reference profile is shared JSON and can
+ * hold anything; a mistyped CLI flag parses to NaN. */
+function shown(x) {
+  return typeof x === 'string' ? JSON.stringify(x) : String(x);
+}
+
+function assertFiniteNumber(name, x) {
+  if (typeof x !== 'number' || !Number.isFinite(x)) {
+    throw new Error(`${name} must be a finite number (got ${shown(x)})`);
+  }
+}
+
+/* Why `x` cannot be used as a scene threshold, or null when it can. Scene
+ * scores run from 0 to 1: 0 selects every frame and 1 is never exceeded, so
+ * both ends are out. */
+export function sceneThresholdProblem(x) {
+  if (typeof x === 'number' && x > 0 && x < 1) return null;
+  return `must be a number between 0 and 1 (got ${shown(x)})`;
+}
+
 /* ─────────────────────────────────────── probe ─── */
 
 /* A container without a duration (a recording that was never finalized, a
@@ -144,6 +166,8 @@ function evalFrameRate(s) {
  * minimal false positives on slow pans. */
 export function detectShots(videoPath, threshold = 0.15) {
   assertSafeVideoPath(videoPath);
+  const badThreshold = sceneThresholdProblem(threshold);
+  if (badThreshold) throw new Error(`scene threshold ${badThreshold}`);
   const r = runFfmpeg('shot detection', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
@@ -164,6 +188,8 @@ export function detectShots(videoPath, threshold = 0.15) {
  * d = minimum duration of dark window in seconds to count as a fade. */
 export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
   assertSafeVideoPath(videoPath);
+  assertFiniteNumber('minDurSec', minDurSec);
+  assertFiniteNumber('picTh', picTh);
   const r = runFfmpeg('fade detection', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
@@ -184,7 +210,8 @@ export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
  * Returns array of #rrggbb hex strings sorted by frequency. */
 export function extractPalette(videoPath, { maxColors = 8, startSec = 0, endSec = null } = {}) {
   assertSafeVideoPath(videoPath);
-  const tmp = path.join(os.tmpdir(), `palette-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
+  assertFiniteNumber('maxColors', maxColors);
+  const tmp =path.join(os.tmpdir(), `palette-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
   try {
     const trimArgs = endSec != null
       ? ['-ss', String(startSec), '-to', String(endSec)]

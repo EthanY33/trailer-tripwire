@@ -103,7 +103,7 @@ Or from a local file:
 trailer-tripwire ingest ./ref.mp4 --name my-reference --out ./refs
 ```
 
-The profile is a small JSON (usually 3-4 KB) with duration, resolution, shot cuts, fade windows, a 6-bucket palette over time, and a 60-bucket audio RMS curve. It is stamped with the `reference-profile/v1` schema, which `audit --ref` validates before use.
+The profile is a small JSON (usually 3-4 KB) with duration, resolution, shot cuts, fade windows, a 6-bucket palette over time, and a 60-bucket audio RMS curve. It is stamped with the `reference-profile/v1` schema, which `audit --ref` validates before use, and a profile whose `shots.sceneThreshold` is not a number between 0 and 1 is refused.
 
 ### Audit a trailer
 

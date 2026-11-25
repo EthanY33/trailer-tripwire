@@ -15,12 +15,13 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm, readFile, stat } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { audit } from "../src/audit.mjs";
+import { detectShots, detectFades, extractPalette } from "../src/video-analysis.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -153,3 +154,74 @@ test(
     }
   },
 );
+
+// A scene threshold is written into ffmpeg's filtergraph. This value closes
+// the select expression and appends a metadata filter that makes ffmpeg write
+// a file (relative, so into the current directory).
+const INJECTED_FILE = "tt-injected-by-threshold.txt";
+const INJECTION =
+  `0)',metadata=mode=add:key=x:value=INJECTED,metadata=mode=print:file=${INJECTED_FILE},select='gt(scene,0`;
+
+test(
+  "audit() rejects a reference profile whose scene threshold is not a number between 0 and 1",
+  { timeout: TIMEOUT },
+  async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tt-test-"));
+    const injected = path.join(process.cwd(), INJECTED_FILE);
+    try {
+      const profile = JSON.parse(await readFile(REF_PROFILE, "utf8"));
+      const evil = path.join(dir, "evil.profile.json");
+      for (const bad of [INJECTION, "0.15", null, 0, 1, -0.15]) {
+        profile.shots.sceneThreshold = bad;
+        await writeFile(evil, JSON.stringify(profile));
+        assert.throws(
+          () => audit({ videoPath: FIXTURE, refPath: evil, verbose: false }),
+          /invalid profile: shots\.sceneThreshold/,
+          `sceneThreshold ${JSON.stringify(bad)} must be refused`,
+        );
+      }
+      await writeFile(evil, JSON.stringify({ schema: "reference-profile/v1" }));
+      assert.throws(
+        () => audit({ videoPath: FIXTURE, refPath: evil, verbose: false }),
+        /invalid profile: shots\.sceneThreshold/,
+        "a profile without a shots object must be refused, not crash",
+      );
+      await assert.rejects(stat(injected), "ffmpeg must never be handed the injected filter");
+    } finally {
+      await rm(injected, { force: true });
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "detectShots() refuses a threshold that is not a number between 0 and 1",
+  { timeout: TIMEOUT },
+  async () => {
+    const injected = path.join(process.cwd(), INJECTED_FILE);
+    try {
+      for (const bad of [INJECTION, "0.15", NaN, null, 0, 1]) {
+        assert.throws(
+          () => detectShots(FIXTURE, bad),
+          /scene threshold must be a number between 0 and 1/,
+          `threshold ${String(bad)} must be refused`,
+        );
+      }
+      await assert.rejects(stat(injected), "ffmpeg must never be handed the injected filter");
+    } finally {
+      await rm(injected, { force: true });
+    }
+  },
+);
+
+test("detectFades() and extractPalette() refuse filter options that are not numbers", () => {
+  assert.throws(
+    () => detectFades(FIXTURE, { minDurSec: "0.2:pic_th=0" }),
+    /minDurSec must be a finite number/,
+  );
+  assert.throws(() => detectFades(FIXTURE, { picTh: NaN }), /picTh must be a finite number/);
+  assert.throws(
+    () => extractPalette(FIXTURE, { maxColors: "5:stats_mode=diff" }),
+    /maxColors must be a finite number/,
+  );
+});

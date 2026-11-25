@@ -11,7 +11,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   probe, detectShots, detectFades, extractPaletteOverTime,
-  analyzeAudio, shotStats, fadeVsCutRatio,
+  analyzeAudio, shotStats, fadeVsCutRatio, sceneThresholdProblem,
 } from './video-analysis.mjs';
 
 function stdev(arr) {
@@ -31,6 +31,10 @@ export function audit({ videoPath, refPath = null, outPath = null, verbose = tru
   if (refPath) {
     ref = JSON.parse(fs.readFileSync(path.resolve(refPath), 'utf8'));
     if (ref.schema !== 'reference-profile/v1') throw new Error(`invalid profile schema: ${ref.schema}`);
+    // The threshold is written into ffmpeg's filtergraph, and a profile is a
+    // shared JSON file: anything but a number in range stops here.
+    const badThreshold = sceneThresholdProblem(ref.shots?.sceneThreshold);
+    if (badThreshold) throw new Error(`invalid profile: shots.sceneThreshold ${badThreshold}`);
   }
 
   const sceneThreshold = ref ? ref.shots.sceneThreshold : 0.15;
