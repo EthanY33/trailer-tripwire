@@ -72,7 +72,7 @@ export function checklist({ meta, stats, fadeRatio, fades, audioData, palette })
     else ok.push(`Audio dynamics: RMS stdev ${rmsStdev.toFixed(2)} dB — expressive.`);
 
     if (audioData.peakDbfs > -1) findings.push(['WARN', 'audio-peak',
-      `Sample peak ${audioData.peakDbfs}dBFS — too hot. Target true-peak ceiling is -1.0 dBTP for streaming platforms.`]);
+      `Peak ${audioData.peakDbfs}dBFS — too hot. Target true-peak ceiling is -1.0 dBTP for streaming platforms.`]);
   }
 
   if (!meta.hasAudio && meta.durationSec > 12) findings.push(['NOTE', 'no-audio',
