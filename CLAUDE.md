@@ -6,7 +6,7 @@ Node 18+ CLI, MIT, v1.0.0. Catches AI-default patterns in video trailers so AI-s
 ```
 trailer-tripwire ingest <url-or-path> --name <ref>    # reference profile JSON
 trailer-tripwire audit <file> [--ref <profile.json>]  # absolute checklist (+ delta vs reference); exit 2 on any CRITICAL
-trailer-tripwire check [--dir <prefix>] [--ext mp4]   # scan staged
+trailer-tripwire check [--dir <prefix>] [--ext mp4]   # scan staged; exit 1 on CRITICAL, 2 if a video could not be audited
 trailer-tripwire install-hooks [--dir <prefix>]       # pre-commit gate
 tt audit <file>                                       # short alias
 node bin/cli.mjs <command>                            # from source; or npm run audit -- <file>
@@ -30,6 +30,7 @@ Calibrated to corporate-launch aesthetic (Google Canvas, Gemini era, NVIDIA Open
 
 ## `check` contract (load-bearing, same rules as the siblings' `check`)
 - Runs every git command from `git rev-parse --show-toplevel`, so it works from a subdirectory. Audits the staged blob, never the working tree file: `git cat-file --filters :0:<path>` (raw `blob` as fallback) written to a temp file under `os.tmpdir()` that keeps the extension and is deleted in a `finally`.
+- Fails closed. Exit 1 = CRITICAL findings (wins when both apply). Exit 2 = something could not be audited: unreadable blob, an `audit()` throw (corrupt or durationless video), missing ffmpeg binary (`ffmpeg-static` fetches it in an install script, so `--ignore-scripts` installs have none), git failure or a git child killed by a signal. Never return 0 for a video that was not audited; `bin/cli.mjs` maps a missing exit code to 1.
 
 ## Known limitations (accepted, don't "fix")
 - Procedural audio with sharp SFX accents (UI ticks, explosions) passes the RMS-stdev check.

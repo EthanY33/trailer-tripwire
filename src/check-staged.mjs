@@ -1,5 +1,7 @@
 /* Scan the git staged set for video files and audit each one.
  * Exits non-zero if any have CRITICAL findings — used as a pre-commit gate.
+ * Exit codes: 0 pass, 1 CRITICAL findings, 2 a staged video could not be
+ * audited (unreadable or corrupt content, missing ffmpeg, git failure).
  *
  * Usage (via CLI):
  *   trailer-tripwire check [--dir <path-prefix>] [--ext mp4,webm,mov,mkv]
@@ -16,6 +18,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import ffmpegPath from 'ffmpeg-static';
 import { audit } from './audit.mjs';
 
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -31,6 +34,22 @@ function gitFailure(r) {
   if (r.signal) return `git was killed by ${r.signal}`;
   const err = String(r.stderr || '').trim().split(/\r?\n/)[0];
   return err || `git exited with status ${r.status}`;
+}
+
+// An error message as one line of bounded length (ffmpeg's can run to many).
+function oneLine(message) {
+  const flat = String(message).replace(/\s+/g, ' ').trim();
+  return flat.length > 300 ? `${flat.slice(0, 297)}...` : flat;
+}
+
+// The gate fails closed: a video it could not look at is never waved through.
+function notAudited(count) {
+  console.log('');
+  console.log(`trailer-tripwire: ${count} staged video file(s) could not be audited, commit blocked.`);
+  console.log('  Options:');
+  console.log('    1. Fix the cause named above, then `git add` the file again');
+  console.log('    2. Bypass: `git commit --no-verify` (use sparingly)');
+  return { exitCode: 2, blocked: 0, errored: count };
 }
 
 /* Write the staged content of `name` to the file `dest`. git writes straight
@@ -88,6 +107,15 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
 
   if (!trailers.length) return { exitCode: 0 };
 
+  // ffmpeg-static downloads its binary in an install script, so an install
+  // with scripts disabled leaves the package without one. Say that once,
+  // instead of one obscure error per file.
+  if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+    const where = ffmpegPath || 'ffmpeg-static has no build for this platform';
+    console.error(`trailer-tripwire: the ffmpeg binary is missing (${where}). Try \`npm rebuild ffmpeg-static\`.`);
+    return notAudited(trailers.length);
+  }
+
   console.log(`→ trailer-tripwire: auditing ${trailers.length} staged video file(s)...`);
 
   let blocked = 0;
@@ -112,7 +140,7 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
           console.log(`  ✓ ${t} — no CRITICAL findings`);
         }
       } catch (e) {
-        console.log(`  ! ${t} — audit error: ${String(e.message).split(tmp).join(t)}`);
+        console.log(`  ! ${t}: could not be audited: ${oneLine(String(e.message).split(tmp).join(t))}`);
         errored++;
       } finally {
         fs.rmSync(tmp, { force: true });
@@ -125,16 +153,14 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
   if (blocked > 0) {
     console.log('');
     console.log(`✗ trailer-tripwire: ${blocked} trailer(s) have CRITICAL findings — commit blocked.`);
+    if (errored > 0) console.log(`  ${errored} more could not be audited (see above).`);
     console.log('  Options:');
     console.log('    1. Fix the findings (run `trailer-tripwire audit <file>` for full details)');
     console.log('    2. Bypass: `git commit --no-verify` (use sparingly)');
     return { exitCode: 1, blocked, errored };
   }
 
-  if (errored > 0) {
-    console.log(`! trailer-tripwire: ${errored} audit error(s) — not blocking, but inspect manually.`);
-    return { exitCode: 0, blocked: 0, errored };
-  }
+  if (errored > 0) return notAudited(errored);
 
   console.log('✓ trailer-tripwire: all staged videos pass.');
   return { exitCode: 0, blocked: 0, errored: 0 };

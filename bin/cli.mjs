@@ -48,7 +48,8 @@ Commands:
 
   check [--dir <prefix>] [--ext mp4,webm,mov,mkv]
       Audit any video files in the git staged set. Used as a pre-commit
-      gate. Exits 1 if any CRITICAL findings.
+      gate. Exits 1 if any CRITICAL findings, 2 if a staged video could
+      not be audited.
 
   install-hooks [--dir <prefix>]
       Install a pre-commit hook that runs \`check\` on every commit.
@@ -106,7 +107,8 @@ async function main() {
     case 'check': {
       const ext = args.ext ? args.ext.split(',').map(s => s.trim()) : undefined;
       const { exitCode } = checkStaged({ dir: args.dir || null, ext });
-      return exitCode;
+      // Fail closed: a result without an exit code must not read as a pass.
+      return exitCode ?? 1;
     }
 
     case 'install-hooks': {

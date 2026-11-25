@@ -130,7 +130,7 @@ trailer-tripwire install-hooks
 trailer-tripwire install-hooks --dir brand/trailers/
 ```
 
-After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked. The check audits the staged content, which is what the commit records, not the file in the working tree: after a blocked commit, re-export and `git add` the file again before you retry.
+After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked. The check audits the staged content, which is what the commit records, not the file in the working tree: after a blocked commit, re-export and `git add` the file again before you retry. A staged video that cannot be audited (a corrupt or truncated file, a missing ffmpeg binary) blocks the commit too. The gate never passes a file it could not look at.
 
 The installer owns one block in the pre-commit hook and nothing else:
 
@@ -160,6 +160,8 @@ trailer-tripwire check --dir brand/trailers/
 # Custom extensions
 trailer-tripwire check --ext mp4,webm
 ```
+
+Exit codes: `0` if every staged video passes (or none is staged), `1` if any has CRITICAL findings, `2` if a staged video could not be audited or git failed.
 
 ---
 

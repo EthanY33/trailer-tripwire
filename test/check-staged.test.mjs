@@ -13,8 +13,11 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { checkStaged } from "../src/check-staged.mjs";
+
+const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "cli.mjs");
 
 for (const key of Object.keys(process.env)) {
   if (key.startsWith("GIT_")) delete process.env[key];
@@ -124,10 +127,17 @@ test("a staged video whose name git would C-quote is audited, not skipped", { ti
   // Without -z git prints this name quoted, with octal escapes.
   assert.match(git(repo, "diff", "--cached", "--name-only"), /^"brand\/trailers\/trailer-\\303\\251\.mp4"$/);
 
+  // A second quoted name (two CJK characters and a space) with content that
+  // cannot be audited: both are reported, and CRITICAL decides the exit code.
+  const unreadable = `brand/trailers/${String.fromCodePoint(0x4e88, 0x544a)} v2.mp4`;
+  stage(repo, unreadable, GARBAGE);
+
   const r = check({ cwd: repo });
   assert.equal(r.exitCode, 1, r.out);
   assert.equal(r.blocked, 1, r.out);
+  assert.equal(r.errored, 1, r.out);
   assert.ok(r.out.includes(name), r.out);
+  assert.ok(r.out.includes(unreadable), r.out);
   assert.match(r.out, /fade-to-black/);
 });
 
@@ -188,4 +198,61 @@ test("check run from a subdirectory audits the staged videos", { timeout: TIMEOU
   assert.equal(r.exitCode, 1, r.out);
   assert.equal(r.blocked, 1, r.out);
   assert.match(r.out, /brand\/trailers\/new\.mp4/);
+});
+
+test("a corrupt or empty staged video blocks the commit instead of passing", () => {
+  const repo = makeRepo();
+  stage(repo, "corrupt.mp4", GARBAGE);
+  stage(repo, "zero.mp4", Buffer.alloc(0));
+
+  const r = check({ cwd: repo });
+  assert.equal(r.exitCode, 2, r.out);
+  assert.equal(r.errored, 2, r.out);
+  assert.equal(r.blocked, 0, r.out);
+  assert.match(r.out, /^ {2}! corrupt\.mp4: could not be audited: \S.*$/m);
+  assert.match(r.out, /^ {2}! zero\.mp4: could not be audited: \S.*$/m);
+  assert.match(r.out, /2 staged video file\(s\) could not be audited, commit blocked/);
+  assert.doesNotMatch(r.out, /not blocking/);
+  assert.ok(!r.out.includes(TMP), `the reason must name the staged path, not the temp file: ${r.out}`);
+});
+
+// Run the real CLI in a child process. NoDefaultCurrentDirectoryInExePath is
+// left as the caller has it.
+function cli(cwd, args, env = {}) {
+  const r = spawnSync(process.execPath, [CLI, ...args], {
+    cwd, encoding: "utf8", env: { ...process.env, ...env },
+  });
+  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+test("the CLI exits 2 when a staged video cannot be audited", () => {
+  const repo = makeRepo();
+  stage(repo, "brand/trailers/corrupt.mp4", GARBAGE);
+
+  const r = cli(repo, ["check", "--dir", "brand/trailers/"]);
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /corrupt\.mp4: could not be audited/);
+  assert.deepEqual(fs.readdirSync(TMP), []);
+});
+
+test("a missing ffmpeg binary blocks a known-CRITICAL video with one clear reason", () => {
+  const repo = makeRepo();
+  stage(repo, "brand/trailers/slideshow.mp4", SLIDESHOW);
+
+  // ffmpeg-static takes its binary path from FFMPEG_BIN. A path with nothing
+  // behind it is what an install with scripts disabled leaves you with.
+  const missing = path.join(ROOT, "no-such-ffmpeg");
+  const r = cli(repo, ["check"], { FFMPEG_BIN: missing });
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /ffmpeg binary is missing/);
+  assert.ok(r.out.includes(missing), r.out);
+  assert.match(r.out, /1 staged video file\(s\) could not be audited, commit blocked/);
+  assert.doesNotMatch(r.out, /Cannot read properties/);
+});
+
+test("check fails with a reason outside a git repository", () => {
+  const dir = makeDir("plain");
+  const r = check({ cwd: dir });
+  assert.equal(r.exitCode, 2, r.out);
+  assert.match(r.out, /^trailer-tripwire: not inside a git repository$/);
 });
