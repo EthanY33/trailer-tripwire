@@ -22,6 +22,17 @@ function stdev(arr) {
 }
 function pct(x) { return (x * 100).toFixed(1) + '%'; }
 
+/* The buckets the RMS spread is measured over: the audible ones, at or above
+ * the -50 dBFS line the silent ratio uses. A silent bucket (an encoder's
+ * tail, a closing fade) is dead air, not dynamics: counted, a single one
+ * makes a flat drone read as expressive. With fewer than three audible
+ * buckets there is no spread to measure, and the track is judged as it
+ * always was, over every bucket above digital silence. */
+function dynamicsBuckets(rmsPerBucket) {
+  const audible = rmsPerBucket.filter(x => x >= -50);
+  return audible.length >= 3 ? audible : rmsPerBucket.filter(x => x > -100);
+}
+
 /* The absolute checklist. A pure function of the measured numbers, so that a
  * recorded reference profile can be run through it without its video. */
 export function checklist({ meta, stats, fadeRatio, fades, audioData, palette }) {
@@ -53,8 +64,7 @@ export function checklist({ meta, stats, fadeRatio, fades, audioData, palette })
   else ok.push(`Audio density: ${pct(audioData.silentRatio)} silent (under -50dBFS) — filled.`);
 
   if (meta.hasAudio) {
-    const rmsValid = audioData.rmsPerBucket.filter(x => x > -100);
-    const rmsStdev = stdev(rmsValid);
+    const rmsStdev = stdev(dynamicsBuckets(audioData.rmsPerBucket));
     if (rmsStdev < 3) findings.push(['CRITICAL', 'audio-flat',
       `Audio RMS stdev is ${rmsStdev.toFixed(2)} dB — almost no dynamic variation. This is the procedural-drone tell. Composed music swings 8-15 dB over its duration.`]);
     else if (rmsStdev < 6) findings.push(['WARN', 'audio-flat',
@@ -129,8 +139,8 @@ export function audit({ videoPath, refPath = null, outPath = null, verbose = tru
     }
 
     if (ref.audio.hasAudio && audioData.hasAudio) {
-      const refStdev = stdev((ref.audio.rmsPerBucket || []).filter(x => x > -100));
-      const thisStdev = stdev(audioData.rmsPerBucket.filter(x => x > -100));
+      const refStdev = stdev(dynamicsBuckets(ref.audio.rmsPerBucket || []));
+      const thisStdev = stdev(dynamicsBuckets(audioData.rmsPerBucket));
       if (refStdev > 0 && thisStdev < refStdev * 0.5) {
         refDelta.push(['WARN', 'vs-ref-audio-dynamics',
           `Audio dynamic range ${thisStdev.toFixed(1)} dB is less than half the reference's ${refStdev.toFixed(1)} dB — your audio is flatter than the inspiration.`]);

@@ -21,6 +21,7 @@ npm test                                              # node --test on the test/
 - CRITICAL: fade-to-black > 40% of cuts; audio RMS stdev < 3 dB.
 - WARN: fade-to-black >= 20% of cuts; RMS stdev < 6 dB; > 2 black windows longer than 1.5s; audio peak > -1 dBFS; median shot < 0.4s; silent ratio (below -50 dBFS) > 30%; resolution < 1080p.
 - NOTE: median shot > 15s; no audio track on video > 12s; < 4 distinct palette hue families.
+- RMS stdev is taken over the audible buckets only (>= -50 dBFS, the silent-ratio line), and `analyzeAudio()` drops the leftover frame after the last full bucket: one near-silent bucket used to make a flat drone read as expressive. With fewer than 3 audible buckets it falls back to every bucket above -100 dBFS, as before.
 
 Calibrated to corporate-launch aesthetic (Google Canvas, Gemini era, NVIDIA OpenClaw). Action / music-video / art-film vibes misfire: fork and tune, don't tighten in main. The shipped reference `demo/google-canvas.profile.json` must raise no CRITICAL on its own recorded numbers (its fade share is exactly 40%, its RMS stdev 3.11 dB): `checklist()` is a pure function so `test/audit.test.mjs` can run the profile through it without the video.
 

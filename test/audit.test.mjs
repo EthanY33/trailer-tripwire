@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 
 import { audit, checklist } from "../src/audit.mjs";
 import { ingest } from "../src/ingest.mjs";
-import { detectShots, detectFades, extractPalette } from "../src/video-analysis.mjs";
+import { detectShots, detectFades, extractPalette, analyzeAudio } from "../src/video-analysis.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -238,6 +238,72 @@ test(
     assert.equal(result.hasCritical, false);
   },
 );
+
+// A flat drone is the tell the audio-flat CRITICAL exists for. One bucket of
+// near-silence (the few samples left after the last full bucket, an encoder's
+// tail, a closing fade) used to lift the spread past 6 dB: "expressive".
+test(
+  "a constant drone is CRITICAL audio-flat whatever its last samples are",
+  { timeout: TIMEOUT },
+  async () => {
+    const drone = await synthesize("drone.mp4", [
+      "-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=20",
+      "-f", "lavfi", "-i", "sine=frequency=110:duration=20",
+      ...X264, "-c:a", "aac", "-shortest",
+    ]);
+
+    const audioData = analyzeAudio(drone, { buckets: 30 });
+    assert.equal(audioData.rmsPerBucket.length, 30, "leftover samples are not a bucket of their own");
+    assert.equal(audioData.silentRatio, 0);
+
+    // A reference as older versions ingested it, leftover bucket included.
+    const profile = JSON.parse(await readFile(REF_PROFILE, "utf8"));
+    profile.audio.rmsPerBucket.push(-78.1);
+    const refPath = path.join(FIXTURE_DIR, "ref-with-leftover-bucket.profile.json");
+    await writeFile(refPath, JSON.stringify(profile));
+
+    const result = audit({ videoPath: drone, refPath, verbose: false });
+    assert.equal(
+      severitiesByTag(result.findings).get("audio-flat"),
+      "CRITICAL",
+      `expected audio-flat=CRITICAL:\n${result.report}`,
+    );
+    assert.equal(result.hasCritical, true);
+    assert.match(
+      result.report,
+      /less than half the reference's 3\.1 dB/,
+      "the reference's spread must not count its leftover bucket either",
+    );
+  },
+);
+
+test("buckets under the -50 dBFS silence line do not count as audio dynamics", async () => {
+  const numbers = recordedNumbers(JSON.parse(await readFile(REF_PROFILE, "utf8")));
+  const flat = Array.from({ length: 27 }, () => -21);
+  for (const tail of [[-65], [-55, -70, -90], [-120, -120]]) {
+    const rmsPerBucket = [...flat, ...tail];
+    const silentRatio = tail.length / rmsPerBucket.length;
+    const { findings } = checklist({ ...numbers, audioData: { ...numbers.audioData, rmsPerBucket, silentRatio } });
+    assert.equal(
+      severitiesByTag(findings).get("audio-flat"),
+      "CRITICAL",
+      `a drone that ends in ${JSON.stringify(tail)} is still a drone`,
+    );
+  }
+});
+
+test("with fewer than three audible buckets the spread is measured as before", async () => {
+  const numbers = recordedNumbers(JSON.parse(await readFile(REF_PROFILE, "utf8")));
+  const judge = (rmsPerBucket) => severitiesByTag(checklist({
+    ...numbers,
+    audioData: { ...numbers.audioData, rmsPerBucket, silentRatio: 1 },
+  }).findings).get("audio-flat");
+
+  // Digital silence throughout: nothing to measure, flat.
+  assert.equal(judge(Array.from({ length: 30 }, () => -120)), "CRITICAL");
+  // A hiss at -70 dBFS with two audible stings: over every bucket, as before.
+  assert.equal(judge([...Array.from({ length: 28 }, () => -70), -20, -30]), undefined);
+});
 
 // A scene threshold is written into ffmpeg's filtergraph. This value closes
 // the select expression and appends a metadata filter that makes ffmpeg write

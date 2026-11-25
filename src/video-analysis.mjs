@@ -301,6 +301,11 @@ export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
     const db = (raw === '-inf' || raw === 'nan') ? -120 : parseFloat(raw);
     rmsPerBucket.push(db);
   }
+  // asetnsamples (p=0) emits the samples left over after the last full bucket
+  // as a short frame of its own: usually the decaying tail of the encoder or
+  // the resampler, far quieter than the track. It is not one of the buckets
+  // that were asked for.
+  if (rmsPerBucket.length > buckets) rmsPerBucket.length = buckets;
   const silentRatio = rmsPerBucket.length
     ? rmsPerBucket.filter(db => db < -50).length / rmsPerBucket.length
     : 1;
