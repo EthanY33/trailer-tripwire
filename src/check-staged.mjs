@@ -13,16 +13,22 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { audit } from './audit.mjs';
 
+const MAX_BUFFER = 64 * 1024 * 1024;
+
 export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], cwd = process.cwd() } = {}) {
-  const r = spawnSync('git', ['diff', '--cached', '--name-only', '--diff-filter=AM'], {
-    cwd, encoding: 'utf8',
+  // -z: NUL-separated raw names. The default output C-quotes any name with
+  // a non-ASCII byte, a quote or a backslash, and a quoted name no longer
+  // ends in its extension. ACMR: a rename or copy is listed under its new
+  // path, so a video moved into scope with `git mv` is audited too.
+  const r = spawnSync('git', ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR'], {
+    cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER,
   });
   if (r.status !== 0) {
     console.error('git diff failed:', r.stderr);
     return { exitCode: 2 };
   }
 
-  const staged = r.stdout.split(/\r?\n/).filter(Boolean);
+  const staged = r.stdout.split('\0').filter(Boolean);
   const extRe = new RegExp(`\\.(${ext.join('|')})$`, 'i');
 
   const trailers = staged.filter(f => {
