@@ -61,7 +61,7 @@ function remove(p) {
  * slashes, no leading `./`, exactly one trailing slash. Returns '' for the
  * repository root (no restriction) and null for a directory outside the
  * repository, which could never match a staged name. */
-function scopeOf(dir, root) {
+export function scopeOf(dir, root) {
   let d = String(dir);
   if (path.isAbsolute(d)) {
     // Compare resolved paths first, so a symlinked or 8.3 spelling of the

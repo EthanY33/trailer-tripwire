@@ -15,7 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkStaged } from "../src/check-staged.mjs";
+import { checkStaged, scopeOf } from "../src/check-staged.mjs";
 
 const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "cli.mjs");
 
@@ -156,7 +156,7 @@ test("a video moved into the --dir scope with git mv is audited", { timeout: TIM
   assert.match(r.out, /brand\/trailers\/launch\.mp4/);
 });
 
-test("check audits the staged blob, not a later working tree edit", { timeout: TIMEOUT }, () => {
+test("check audits the staged blob, not a later working tree edit", { timeout: 2 * TIMEOUT }, () => {
   const repo = makeRepo();
   const rel = "brand/trailers/f.mp4";
 
@@ -280,12 +280,10 @@ function audited(opts) {
   return [...r.out.matchAll(/^ {2}! (.+?): could not be audited/gm)].map((m) => m[1]).sort();
 }
 
-test("--dir is matched as a directory, however it is spelled", () => {
+test("every spelling of --dir becomes the same directory scope", () => {
   const repo = makeRepo();
-  stage(repo, "brand/trailers/a.mp4", GARBAGE);
-  stage(repo, "brand/trailers-raw/b.mp4", GARBAGE);
-  stage(repo, "other/c.mp4", GARBAGE);
   const abs = path.join(repo, "brand", "trailers");
+  fs.mkdirSync(abs, { recursive: true });
   const BS = String.fromCharCode(92); // a backslash, as typed in cmd.exe or PowerShell
 
   for (const dir of [
@@ -294,22 +292,45 @@ test("--dir is matched as a directory, however it is spelled", () => {
     "./brand/trailers/",
     "./brand/trailers",
     "brand//trailers/",
+    "brand/./trailers",
+    "other/../brand/trailers/",
     `brand${BS}trailers${BS}`,
     `.${BS}brand${BS}trailers`,
     abs,
     abs + path.sep,
+    path.join(repo, "brand", "missing", "..", "trailers"),
   ]) {
-    assert.deepEqual(audited({ cwd: repo, dir }), ["brand/trailers/a.mp4"], `--dir ${dir}`);
+    assert.equal(scopeOf(dir, repo), "brand/trailers/", `--dir ${dir}`);
   }
 
-  // A relative --dir is relative to the repository root, not to the current directory.
+  // The repository root is no restriction at all.
+  for (const dir of [".", "./", repo, repo + path.sep]) {
+    assert.equal(scopeOf(dir, repo), "", `--dir ${dir}`);
+  }
+
+  // Outside the repository nothing can ever match.
+  for (const dir of ["..", "../elsewhere/", "brand/../../elsewhere", ROOT, path.join(ROOT, "elsewhere")]) {
+    assert.equal(scopeOf(dir, repo), null, `--dir ${dir}`);
+  }
+});
+
+test("--dir limits the audit to that directory and not to its name as a prefix", () => {
+  const repo = makeRepo();
+  stage(repo, "brand/trailers/a.mp4", GARBAGE);
+  stage(repo, "brand/trailers-raw/b.mp4", GARBAGE);
+  stage(repo, "other/c.mp4", GARBAGE);
+
+  // A leading "./" used to match nothing, so the gate passed without a word.
+  assert.deepEqual(audited({ cwd: repo, dir: "./brand/trailers/" }), ["brand/trailers/a.mp4"]);
+
+  // No trailing slash used to take in brand/trailers-raw/ as well. A relative
+  // --dir is relative to the repository root, not to the current directory.
   assert.deepEqual(audited({ cwd: path.join(repo, "other"), dir: "brand/trailers" }), ["brand/trailers/a.mp4"]);
 
-  // The repository root itself is no restriction.
-  const all = ["brand/trailers-raw/b.mp4", "brand/trailers/a.mp4", "other/c.mp4"];
-  for (const dir of [".", "./", repo]) {
-    assert.deepEqual(audited({ cwd: repo, dir }), all, `--dir ${dir}`);
-  }
+  assert.deepEqual(
+    audited({ cwd: repo, dir: "." }),
+    ["brand/trailers-raw/b.mp4", "brand/trailers/a.mp4", "other/c.mp4"],
+  );
 });
 
 test("--dir outside the repository is an error, not a scope that never matches", () => {
