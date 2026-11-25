@@ -51,6 +51,12 @@ function realPath(p) {
   try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
 }
 
+// Delete a temp file or directory. Best effort: a leftover in the temp
+// directory must not change the verdict.
+function remove(p) {
+  try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 3 }); } catch { /* left for the OS */ }
+}
+
 /* Turn `--dir` into the form staged names are compared with: forward
  * slashes, no leading `./`, exactly one trailing slash. Returns '' for the
  * repository root (no restriction) and null for a directory outside the
@@ -111,10 +117,7 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
   // current directory is, so everything below runs from that root.
   const top = runGit(git, cwd, ['rev-parse', '--show-toplevel']);
   if (top.error || top.status !== 0) {
-    const notARepo = !top.error && !top.signal;
-    console.error(notARepo
-      ? 'trailer-tripwire: not inside a git repository'
-      : `trailer-tripwire: cannot run git: ${gitFailure(top)}`);
+    console.error(`trailer-tripwire: cannot find the repository root: ${gitFailure(top)}`);
     return { exitCode: 2 };
   }
   const root = top.stdout.replace(/\r?\n$/, '');
@@ -165,7 +168,13 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
   let errored = 0;
   // ffmpeg needs a file, so each staged blob goes to a temp file that keeps
   // the extension and is deleted again as soon as it has been audited.
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trailer-tripwire-'));
+  let tmpDir;
+  try {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trailer-tripwire-'));
+  } catch (e) {
+    console.error(`trailer-tripwire: cannot create a temp directory: ${oneLine(e.message)}`);
+    return notAudited(trailers.length);
+  }
   try {
     for (const [i, t] of trailers.entries()) {
       const suffix = /\.[a-z0-9]+$/i.exec(t);
@@ -186,11 +195,11 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
         console.log(`  ! ${t}: could not be audited: ${oneLine(String(e.message).split(tmp).join(t))}`);
         errored++;
       } finally {
-        fs.rmSync(tmp, { force: true });
+        remove(tmp);
       }
     }
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    remove(tmpDir);
   }
 
   if (blocked > 0) {

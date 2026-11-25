@@ -250,11 +250,27 @@ test("a missing ffmpeg binary blocks a known-CRITICAL video with one clear reaso
   assert.doesNotMatch(r.out, /Cannot read properties/);
 });
 
+test("check blocks with a reason when it cannot create its temp directory", () => {
+  const repo = makeRepo();
+  stage(repo, "clip.mp4", GARBAGE);
+
+  process.env.TMPDIR = process.env.TEMP = process.env.TMP = path.join(ROOT, "no-such-dir");
+  try {
+    const r = check({ cwd: repo });
+    assert.equal(r.exitCode, 2, r.out);
+    assert.equal(r.errored, 1, r.out);
+    assert.match(r.out, /^trailer-tripwire: cannot create a temp directory: \S/m);
+  } finally {
+    process.env.TMPDIR = process.env.TEMP = process.env.TMP = TMP;
+  }
+});
+
 test("check fails with a reason outside a git repository", () => {
   const dir = makeDir("plain");
   const r = check({ cwd: dir });
   assert.equal(r.exitCode, 2, r.out);
-  assert.match(r.out, /^trailer-tripwire: not inside a git repository$/);
+  assert.match(r.out, /^trailer-tripwire: cannot find the repository root: \S/);
+  assert.equal(r.out.split("\n").length, 1, "the reason is one line");
 });
 
 // The staged paths a run tried to audit. The files in these tests hold
