@@ -130,7 +130,7 @@ trailer-tripwire install-hooks
 trailer-tripwire install-hooks --dir brand/trailers/
 ```
 
-After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked.
+After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked. The check audits the staged content, which is what the commit records, not the file in the working tree: after a blocked commit, re-export and `git add` the file again before you retry.
 
 The installer owns one block in the pre-commit hook and nothing else:
 

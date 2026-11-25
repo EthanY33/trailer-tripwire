@@ -28,6 +28,9 @@ Calibrated to corporate-launch aesthetic (Google Canvas, Gemini era, NVIDIA Open
 - `composeHook()` cases, first match wins: no file, fresh file; own block present, rewrite it in place and nothing else; file made only of comments, `set -e` and tripwire commands (every hook the old installers wrote), rewrite as blocks in the order screenshot, trailer, copy, siblings keeping their args; hand-written content with a tripwire marker or command, drop only the own legacy marker and command lines and append the own block (warns if an `exec` line or an unconditional top-level `exit` sits above it, and if an indented own command is left in place); only column-0 command lines count as own commands; no tripwire trace at all, refuse with exit 1 and print the block.
 - Any install order and any number of re-runs must leave every gate and every hand-written line in place. `test/hook-compose.test.mjs` proves that for all three tool names, `test/install-hooks.test.mjs` against real git (core.hooksPath, linked worktree, a commit through the hook).
 
+## `check` contract (load-bearing, same rules as the siblings' `check`)
+- Runs every git command from `git rev-parse --show-toplevel`, so it works from a subdirectory. Audits the staged blob, never the working tree file: `git cat-file --filters :0:<path>` (raw `blob` as fallback) written to a temp file under `os.tmpdir()` that keeps the extension and is deleted in a `finally`.
+
 ## Known limitations (accepted, don't "fix")
 - Procedural audio with sharp SFX accents (UI ticks, explosions) passes the RMS-stdev check.
 - ffmpeg's scene detector misses dissolves on same-framed content.

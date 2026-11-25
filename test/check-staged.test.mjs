@@ -26,6 +26,12 @@ process.env.GIT_CONFIG_GLOBAL = path.join(ROOT, "gitconfig");
 process.env.GIT_CONFIG_NOSYSTEM = "1";
 process.env.GIT_CEILING_DIRECTORIES = ROOT;
 
+// A private temp directory, so a test can tell that check cleaned up after
+// itself. os.tmpdir() reads these variables on every call.
+const TMP = path.join(ROOT, "tmp");
+fs.mkdirSync(TMP);
+process.env.TMPDIR = process.env.TEMP = process.env.TMP = TMP;
+
 const FFMPEG = (await import("ffmpeg-static")).default;
 const IDENTITY = ["-c", "user.name=tt", "-c", "user.email=tt@example.invalid"];
 
@@ -93,19 +99,21 @@ function stage(repo, rel, content) {
 }
 
 // Run checkStaged with console output captured, so messages can be asserted
-// and the test log stays quiet.
+// and the test log stays quiet. Every run must leave the temp directory empty.
 function check(opts) {
   const out = [];
   const saved = { log: console.log, error: console.error, warn: console.warn };
   console.log = (...a) => out.push(a.join(" "));
   console.error = (...a) => out.push(a.join(" "));
   console.warn = (...a) => out.push(a.join(" "));
+  let result;
   try {
-    const result = checkStaged(opts);
-    return { ...result, out: out.join("\n") };
+    result = checkStaged(opts);
   } finally {
     Object.assign(console, saved);
   }
+  assert.deepEqual(fs.readdirSync(TMP), [], "check must delete its temp files");
+  return { ...result, out: out.join("\n") };
 }
 
 test("a staged video whose name git would C-quote is audited, not skipped", { timeout: TIMEOUT }, () => {
@@ -136,4 +144,48 @@ test("a video moved into the --dir scope with git mv is audited", { timeout: TIM
   assert.equal(r.exitCode, 1, r.out);
   assert.equal(r.blocked, 1, r.out);
   assert.match(r.out, /brand\/trailers\/launch\.mp4/);
+});
+
+test("check audits the staged blob, not a later working tree edit", { timeout: TIMEOUT }, () => {
+  const repo = makeRepo();
+  const rel = "brand/trailers/f.mp4";
+
+  // Blocked version staged, then re-exported over the same path without git add.
+  stage(repo, rel, SLIDESHOW);
+  put(repo, rel, CLEAN);
+  assert.equal(git(repo, "status", "--porcelain").slice(0, 2), "AM");
+  const bad = check({ cwd: repo });
+  assert.equal(bad.exitCode, 1, bad.out);
+  assert.equal(bad.blocked, 1, bad.out);
+
+  // The other way round: what is staged is fine, the working file is not.
+  git(repo, "add", "--", rel);
+  put(repo, rel, SLIDESHOW);
+  const good = check({ cwd: repo });
+  assert.equal(good.exitCode, 0, good.out);
+  assert.equal(good.blocked, 0, good.out);
+  assert.equal(good.errored, 0, good.out);
+});
+
+test("a staged video that was deleted from the working tree is still audited", { timeout: TIMEOUT }, () => {
+  const repo = makeRepo();
+  const abs = path.join(repo, "gone.mp4");
+  stage(repo, "gone.mp4", SLIDESHOW);
+  fs.rmSync(abs);
+
+  const r = check({ cwd: repo });
+  assert.equal(r.exitCode, 1, r.out);
+  assert.equal(r.blocked, 1, r.out);
+  assert.doesNotMatch(r.out, /skipping/);
+  assert.ok(!fs.existsSync(abs), "check must not write into the working tree");
+});
+
+test("check run from a subdirectory audits the staged videos", { timeout: TIMEOUT }, () => {
+  const repo = makeRepo();
+  stage(repo, "brand/trailers/new.mp4", SLIDESHOW);
+
+  const r = check({ cwd: path.join(repo, "brand") });
+  assert.equal(r.exitCode, 1, r.out);
+  assert.equal(r.blocked, 1, r.out);
+  assert.match(r.out, /brand\/trailers\/new\.mp4/);
 });
