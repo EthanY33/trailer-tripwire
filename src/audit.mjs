@@ -22,36 +22,11 @@ function stdev(arr) {
 }
 function pct(x) { return (x * 100).toFixed(1) + '%'; }
 
-export function audit({ videoPath, refPath = null, outPath = null, verbose = true }) {
-  if (!videoPath) throw new Error('usage: audit <video> [--ref <profile.json>] [--out <report.md>]');
-  const abs = path.resolve(videoPath);
-  if (!fs.existsSync(abs)) throw new Error(`not found: ${abs}`);
-
-  let ref = null;
-  if (refPath) {
-    ref = JSON.parse(fs.readFileSync(path.resolve(refPath), 'utf8'));
-    if (ref.schema !== 'reference-profile/v1') throw new Error(`invalid profile schema: ${ref.schema}`);
-    // The threshold is written into ffmpeg's filtergraph, and a profile is a
-    // shared JSON file: anything but a number in range stops here.
-    const badThreshold = sceneThresholdProblem(ref.shots?.sceneThreshold);
-    if (badThreshold) throw new Error(`invalid profile: shots.sceneThreshold ${badThreshold}`);
-  }
-
-  const sceneThreshold = ref ? ref.shots.sceneThreshold : 0.15;
-
-  if (verbose) console.log('→ analyzing', path.relative(process.cwd(), abs));
-  const meta = probe(abs);
-  const cuts = detectShots(abs, sceneThreshold);
-  const stats = shotStats(cuts, meta.durationSec);
-  const fades = detectFades(abs);
-  const fadeRatio = fadeVsCutRatio(cuts, fades);
-  const palette = extractPaletteOverTime(abs, { buckets: 6, colorsPerBucket: 5 });
-  const audioData = analyzeAudio(abs, { buckets: Math.max(30, Math.round(meta.durationSec)) });
-
+/* The absolute checklist. A pure function of the measured numbers, so that a
+ * recorded reference profile can be run through it without its video. */
+export function checklist({ meta, stats, fadeRatio, fades, audioData, palette }) {
   const findings = [];
   const ok = [];
-
-  /* ─ Absolute checklist ─ */
 
   if (stats.medianSec < 0.4) findings.push(['WARN', 'pacing',
     `Median shot length is ${stats.medianSec}s — under 0.4s reads as music-video churn, inappropriate for a studio launch.`]);
@@ -97,6 +72,37 @@ export function audit({ videoPath, refPath = null, outPath = null, verbose = tru
   const uniqHues = new Set(allColors.map(c => c.slice(0, 4))).size;
   if (uniqHues < 4) findings.push(['NOTE', 'palette',
     `Only ~${uniqHues} distinct hue families across the whole video. Monochrome can be intentional, but often reads as "stuck in one mood."`]);
+
+  return { findings, ok };
+}
+
+export function audit({ videoPath, refPath = null, outPath = null, verbose = true }) {
+  if (!videoPath) throw new Error('usage: audit <video> [--ref <profile.json>] [--out <report.md>]');
+  const abs = path.resolve(videoPath);
+  if (!fs.existsSync(abs)) throw new Error(`not found: ${abs}`);
+
+  let ref = null;
+  if (refPath) {
+    ref = JSON.parse(fs.readFileSync(path.resolve(refPath), 'utf8'));
+    if (ref.schema !== 'reference-profile/v1') throw new Error(`invalid profile schema: ${ref.schema}`);
+    // The threshold is written into ffmpeg's filtergraph, and a profile is a
+    // shared JSON file: anything but a number in range stops here.
+    const badThreshold = sceneThresholdProblem(ref.shots?.sceneThreshold);
+    if (badThreshold) throw new Error(`invalid profile: shots.sceneThreshold ${badThreshold}`);
+  }
+
+  const sceneThreshold = ref ? ref.shots.sceneThreshold : 0.15;
+
+  if (verbose) console.log('→ analyzing', path.relative(process.cwd(), abs));
+  const meta = probe(abs);
+  const cuts = detectShots(abs, sceneThreshold);
+  const stats = shotStats(cuts, meta.durationSec);
+  const fades = detectFades(abs);
+  const fadeRatio = fadeVsCutRatio(cuts, fades);
+  const palette = extractPaletteOverTime(abs, { buckets: 6, colorsPerBucket: 5 });
+  const audioData = analyzeAudio(abs, { buckets: Math.max(30, Math.round(meta.durationSec)) });
+
+  const { findings, ok } = checklist({ meta, stats, fadeRatio, fades, audioData, palette });
 
   /* ─ Reference deltas ─ */
 
