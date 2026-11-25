@@ -17,6 +17,12 @@ import { audit } from '../src/audit.mjs';
 import { checkStaged } from '../src/check-staged.mjs';
 import { installHooks } from '../src/install-hooks.mjs';
 
+// Windows looks for a program in the current directory before PATH. Every
+// spawn in src/ already uses an absolute path (src/resolve-bin.mjs); this
+// switch is the second line of defence, for a bare-name spawn that slips in
+// later and for child processes that honour it.
+if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 

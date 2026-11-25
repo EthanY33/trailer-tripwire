@@ -14,6 +14,7 @@ npm test                                              # node --test on the test/
 ```
 - Integration tests run real ffmpeg on `demo/bad-trailer.mp4` (gitignored): slow (~30s+ per audit, 120s timeouts), and pin its documented severities, so threshold changes break them intentionally. Where the fixture is missing (CI, fresh clones) they synthesize a black-gap color slideshow with the bundled ffmpeg instead. CI (`.github/workflows/test.yml`): ubuntu+windows x Node 18/20/22.
 - `ffmpeg-static` is bundled (ffmpeg only; `probe()` uses a system ffprobe if present, else parses `ffmpeg -i`). `yt-dlp` is needed for YouTube ingest only: looks for `<tmpdir>/yt-dlp.exe` first (`os.tmpdir()`, always the `.exe` name even off Windows, a code quirk), then `yt-dlp` on PATH.
+- Never spawn a bare program name. `git`, `ffprobe` and `yt-dlp` go through `resolveBin()` (`src/resolve-bin.mjs`), which walks PATH and skips empty, relative and current-directory entries, because Windows runs a bare name from the current directory first (a repo could ship its own `git.exe`). `bin/cli.mjs` also sets `NoDefaultCurrentDirectoryInExePath=1`. `test/resolve-bin.test.mjs` plants stand-ins to prove it.
 
 ## Thresholds (`src/audit.mjs`, plain `if` branches)
 - CRITICAL: fade-to-black >= 40% of cuts; audio RMS stdev < 3 dB.

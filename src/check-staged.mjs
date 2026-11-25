@@ -23,12 +23,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import ffmpegPath from 'ffmpeg-static';
 import { audit } from './audit.mjs';
+import { resolveBin } from './resolve-bin.mjs';
 
 const MAX_BUFFER = 64 * 1024 * 1024;
 
-// Run git without a shell. Returns the spawnSync result.
-function runGit(cwd, args, opts = {}) {
-  return spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER, ...opts });
+// Run git without a shell. `git` is the absolute path from resolveBin, never
+// the bare name. Returns the spawnSync result.
+function runGit(git, cwd, args, opts = {}) {
+  return spawnSync(git, args, { cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER, ...opts });
 }
 
 // One line saying why a git call failed.
@@ -84,12 +86,12 @@ function notAudited(count) {
  * do that falls back to the raw blob. `:0:<path>` is the index entry at stage
  * 0, spelled out so a path that itself starts with `<digit>:` cannot be
  * misread as a stage number. */
-function writeStagedBlob(root, name, dest) {
+function writeStagedBlob(git, root, name, dest) {
   let r;
   for (const how of [['--filters'], ['blob']]) {
     const fd = fs.openSync(dest, 'w');
     try {
-      r = runGit(root, ['cat-file', ...how, `:0:${name}`], { stdio: ['ignore', fd, 'pipe'] });
+      r = runGit(git, root, ['cat-file', ...how, `:0:${name}`], { stdio: ['ignore', fd, 'pipe'] });
     } finally {
       fs.closeSync(fd);
     }
@@ -99,9 +101,15 @@ function writeStagedBlob(root, name, dest) {
 }
 
 export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], cwd = process.cwd() } = {}) {
+  const git = resolveBin('git', { cwd });
+  if (!git) {
+    console.error('trailer-tripwire: cannot run git: it was not found on PATH');
+    return { exitCode: 2 };
+  }
+
   // git prints staged names relative to the repository root, whatever the
   // current directory is, so everything below runs from that root.
-  const top = runGit(cwd, ['rev-parse', '--show-toplevel']);
+  const top = runGit(git, cwd, ['rev-parse', '--show-toplevel']);
   if (top.error || top.status !== 0) {
     const notARepo = !top.error && !top.signal;
     console.error(notARepo
@@ -121,7 +129,7 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
   // a non-ASCII byte, a quote or a backslash, and a quoted name no longer
   // ends in its extension. ACMR: a rename or copy is listed under its new
   // path, so a video moved into scope with `git mv` is audited too.
-  const r = runGit(root, ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR']);
+  const r = runGit(git, root, ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR']);
   if (r.error || r.status !== 0) {
     console.error(`trailer-tripwire: git diff --cached failed: ${gitFailure(r)}`);
     return { exitCode: 2 };
@@ -163,7 +171,7 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
       const suffix = /\.[a-z0-9]+$/i.exec(t);
       const tmp = path.join(tmpDir, `staged-${i}${suffix ? suffix[0].toLowerCase() : ''}`);
       try {
-        writeStagedBlob(root, t, tmp);
+        writeStagedBlob(git, root, t, tmp);
         const result = audit({ videoPath: tmp, verbose: false });
         if (result.hasCritical) {
           console.log(`  ✗ ${t} — CRITICAL findings (blocking):`);

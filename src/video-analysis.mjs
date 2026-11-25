@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import { resolveBin } from './resolve-bin.mjs';
 
 const FFMPEG = (await import('ffmpeg-static')).default;
 const FFPROBE = FFMPEG.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1');
@@ -34,7 +35,9 @@ function assertSafeVideoPath(p) {
 export function probe(videoPath) {
   assertSafeVideoPath(videoPath);
   // Use system ffprobe if available, else fall back to the one alongside ffmpeg-static.
-  const candidates = [FFPROBE, 'ffprobe'];
+  // The system one is spawned by its absolute path from PATH, never by bare
+  // name: see resolve-bin.mjs.
+  const candidates = [FFPROBE, resolveBin('ffprobe')].filter(Boolean);
   for (const bin of candidates) {
     const r = spawnSync(bin, [
       '-v', 'error', '-print_format', 'json',

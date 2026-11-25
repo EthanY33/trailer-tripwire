@@ -13,6 +13,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { buildBlock, composeHook } from './hook-compose.mjs';
+import { resolveBin } from './resolve-bin.mjs';
 
 const SELF = 'trailer-tripwire';
 
@@ -32,7 +33,10 @@ function checkArgs(dir) {
 }
 
 function resolveHooksDir(cwd) {
-  const r = spawnSync('git', ['rev-parse', '--git-path', 'hooks'], { cwd, encoding: 'utf8' });
+  // The absolute path of git, never the bare name: see resolve-bin.mjs.
+  const git = resolveBin('git', { cwd });
+  if (!git) return null;
+  const r = spawnSync(git, ['rev-parse', '--git-path', 'hooks'], { cwd, encoding: 'utf8' });
   if (r.status !== 0) return null;
   return path.resolve(cwd, r.stdout.trim());
 }
