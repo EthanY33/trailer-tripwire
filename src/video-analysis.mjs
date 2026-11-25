@@ -211,7 +211,7 @@ export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
 export function extractPalette(videoPath, { maxColors = 8, startSec = 0, endSec = null } = {}) {
   assertSafeVideoPath(videoPath);
   assertFiniteNumber('maxColors', maxColors);
-  const tmp =path.join(os.tmpdir(), `palette-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
+  const tmp = path.join(os.tmpdir(), `palette-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
   try {
     const trimArgs = endSec != null
       ? ['-ss', String(startSec), '-to', String(endSec)]
