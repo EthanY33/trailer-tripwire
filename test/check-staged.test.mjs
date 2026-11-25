@@ -217,6 +217,22 @@ test("a corrupt or empty staged video blocks the commit instead of passing", () 
   assert.ok(!r.out.includes(TMP), `the reason must name the staged path, not the temp file: ${r.out}`);
 });
 
+test("a video without a container duration blocks with a reason that says so", () => {
+  // What a browser recording or an interrupted export looks like: Matroska
+  // written to a pipe, so the muxer could never go back to fill in a duration.
+  const made = spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", "-i", SLIDESHOW,
+    "-c", "copy", "-f", "matroska", "pipe:1"], { maxBuffer: 16 * 1024 * 1024 });
+  assert.equal(made.status, 0, String(made.stderr));
+  const repo = makeRepo();
+  stage(repo, "live.mkv", made.stdout);
+
+  const r = check({ cwd: repo });
+  assert.equal(r.exitCode, 2, r.out);
+  assert.equal(r.errored, 1, r.out);
+  assert.match(r.out, /^ {2}! live\.mkv: could not be audited: no duration in the container of live\.mkv/m);
+  assert.doesNotMatch(r.out, /NaN/);
+});
+
 // Run the real CLI in a child process. NoDefaultCurrentDirectoryInExePath is
 // left as the caller has it.
 function cli(cwd, args, env = {}) {

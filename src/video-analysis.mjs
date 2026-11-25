@@ -32,6 +32,16 @@ function assertSafeVideoPath(p) {
 
 /* ─────────────────────────────────────── probe ─── */
 
+/* A container without a duration (a recording that was never finalized, a
+ * file written to a pipe) cannot be cut into time buckets. Say so here,
+ * before NaN reaches an ffmpeg option and comes back as an obscure error. */
+function noDurationError(videoPath) {
+  return new Error(
+    `no duration in the container of ${videoPath} (a recording that was never finalized?). ` +
+    'Remux it first, for example: ffmpeg -i <file> -c copy <new file>',
+  );
+}
+
 export function probe(videoPath) {
   assertSafeVideoPath(videoPath);
   // Use system ffprobe if available, else fall back to the one alongside ffmpeg-static.
@@ -48,8 +58,10 @@ export function probe(videoPath) {
       const data = JSON.parse(r.stdout);
       const v = data.streams.find(s => s.codec_type === 'video');
       const a = data.streams.find(s => s.codec_type === 'audio');
+      const durationSec = parseFloat(data.format.duration);
+      if (!Number.isFinite(durationSec)) throw noDurationError(videoPath);
       return {
-        durationSec: parseFloat(data.format.duration),
+        durationSec,
         width: v ? v.width : null,
         height: v ? v.height : null,
         fps: v ? evalFrameRate(v.r_frame_rate) : null,
@@ -71,7 +83,10 @@ function probeWithFfmpeg(videoPath) {
   const r = spawnSync(FFMPEG, ['-hide_banner', '-i', videoPath], { encoding: 'utf8' });
   const text = r.stderr || '';
   const dur = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(text);
-  if (!dur) return null;
+  if (!dur) {
+    if (/Duration:\s*N\/A/.test(text)) throw noDurationError(videoPath);
+    return null;
+  }
   const videoLine = text.split('\n').find(l => /Stream #\d+:\d+.*: Video: /.test(l)) || '';
   const audioLine = text.split('\n').find(l => /Stream #\d+:\d+.*: Audio: /.test(l)) || '';
   const dims = /, (\d{2,5})x(\d{2,5})[ ,]/.exec(videoLine);
