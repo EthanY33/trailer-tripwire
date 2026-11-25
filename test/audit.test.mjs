@@ -72,6 +72,18 @@ async function synthesize(name, args) {
 
 const X264 = ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"];
 
+// Twenty seconds of one steady tone (lavfi's sine: amplitude 1/8, so a peak
+// near -18 dBFS and an RMS near -21 dBFS), encoded as AAC.
+let dronePath = null;
+async function synthesizeDrone() {
+  dronePath ??= await synthesize("drone.mp4", [
+    "-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=20",
+    "-f", "lavfi", "-i", "sine=frequency=110:duration=20",
+    ...X264, "-c:a", "aac", "-shortest",
+  ]);
+  return dronePath;
+}
+
 // What checklist() takes, read back from a reference profile.
 function recordedNumbers(profile) {
   return {
@@ -246,11 +258,7 @@ test(
   "a constant drone is CRITICAL audio-flat whatever its last samples are",
   { timeout: TIMEOUT },
   async () => {
-    const drone = await synthesize("drone.mp4", [
-      "-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=20",
-      "-f", "lavfi", "-i", "sine=frequency=110:duration=20",
-      ...X264, "-c:a", "aac", "-shortest",
-    ]);
+    const drone = await synthesizeDrone();
 
     const audioData = analyzeAudio(drone, { buckets: 30 });
     assert.equal(audioData.rmsPerBucket.length, 30, "leftover samples are not a bucket of their own");
@@ -303,6 +311,48 @@ test("with fewer than three audible buckets the spread is measured as before", a
   assert.equal(judge(Array.from({ length: 30 }, () => -120)), "CRITICAL");
   // A hiss at -70 dBFS with two audible stings: over every bucket, as before.
   assert.equal(judge([...Array.from({ length: 28 }, () => -70), -20, -30]), undefined);
+});
+
+// The audio-peak WARN is about clipping, so it has to read sample peaks. The
+// loudest bucket's RMS, which it used to read, stays under -1 dBFS for
+// anything short of a full-scale square wave.
+test(
+  "audio clipped at full scale gets the audio-peak WARN and its real peak in the report",
+  { timeout: TIMEOUT },
+  async () => {
+    const clipped = await synthesize("clipped.mp4", [
+      "-f", "lavfi", "-i", "color=c=gray:s=320x180:r=25:d=6",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=6,volume=20dB",
+      ...X264, "-c:a", "aac", "-shortest",
+    ]);
+
+    const audioData = analyzeAudio(clipped, { buckets: 30 });
+    assert.ok(audioData.peakDbfs >= -0.1, `expected a peak at full scale, got ${audioData.peakDbfs} dBFS`);
+    assert.ok(
+      Math.max(...audioData.rmsPerBucket) < -1,
+      "the loudest bucket's RMS is under the WARN line even though the audio clips",
+    );
+
+    const result = audit({ videoPath: clipped, verbose: false });
+    assert.equal(
+      severitiesByTag(result.findings).get("audio-peak"),
+      "WARN",
+      `expected audio-peak=WARN:\n${result.report}`,
+    );
+    assert.ok(
+      result.report.includes(`| peak ${audioData.peakDbfs}dBFS`),
+      `the report header must show the sample peak:\n${result.report}`,
+    );
+  },
+);
+
+test("analyzeAudio() reports the sample peak, not the loudest bucket's RMS", { timeout: TIMEOUT }, async () => {
+  const audioData = analyzeAudio(await synthesizeDrone(), { buckets: 30 });
+  assert.ok(
+    audioData.peakDbfs > -19 && audioData.peakDbfs < -17,
+    `a sine of amplitude 1/8 peaks near -18 dBFS, got ${audioData.peakDbfs}`,
+  );
+  assert.ok(Math.max(...audioData.rmsPerBucket) < -20, "its RMS sits 3 dB lower");
 });
 
 // A scene threshold is written into ffmpeg's filtergraph. This value closes

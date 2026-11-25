@@ -31,7 +31,7 @@ Measurable pattern tells, derived empirically by comparing an AI-generated trail
 | **Fade-to-black fraction** | CRITICAL / WARN | > 40% / >= 20% of cuts | Slideshow tell. AI loves fade-between-beats; human editors use hard cuts and match cuts. Needs >= 3 detected shots to fire. Exactly 40% is a WARN: the Google Canvas reference sits there. |
 | **Audio RMS stdev** | CRITICAL / WARN | < 3 dB / < 6 dB | Procedural-drone tell. Composed music swings 8-15 dB over its run; drones stay flat. Measured over the audible buckets (at or above -50 dBFS), so a silent tail or a closing fade does not pass for dynamics. |
 | **Long black windows** | WARN | > 2 windows longer than 1.5s | Sparse, unfinished, or padded. |
-| **Audio peak** | WARN | > -1 dBFS | Clipping risk. Streaming platforms target a -1 dBTP true-peak ceiling. |
+| **Audio peak** | WARN | sample peak > -1 dBFS | Clipping risk. Streaming platforms target a -1 dBTP true-peak ceiling. |
 | **Median shot length** | WARN / NOTE | < 0.4s (WARN), > 15s (NOTE) | Outside human-editor range: music-video churn on one end, slideshow on the other. |
 | **Silent ratio** | WARN | > 30% of buckets below -50 dBFS | Dead air. Composed trailer music carries continuously. |
 | **Resolution** | WARN | frame width < 1080 px | Below typical platform minimums. |
@@ -174,7 +174,7 @@ Everything sits on top of the bundled `ffmpeg-static`. `ffmpeg-static` ships no 
 - **Shot detection** runs ffmpeg's `select='gt(scene,<threshold>)'` filter (default threshold `0.15`, calibrated so motion-graphics dissolves and hard gameplay cuts both register) and reads the `pts_time` markers.
 - **Fade detection** runs `blackdetect` and reports near-black windows; a cut is counted as fade-based when it lands inside (or at the edge of) one of those windows.
 - **Palette over time** slices the video into 6 time buckets and runs `palettegen` on each, reading the resulting tiny PNG back through raw ffmpeg to avoid pulling in a PNG decoder.
-- **Audio analysis** resamples to 48 kHz, chunks into buckets, and reads per-bucket `RMS_level` from the `astats` filter to derive dynamic range, silent ratio, and peak.
+- **Audio analysis** resamples to 48 kHz, chunks into buckets, and reads per-bucket `RMS_level` and `Peak_level` from the `astats` filter: the RMS levels give dynamic range and silent ratio, the highest `Peak_level` is the sample peak.
 
 The hue-family count is deliberately coarse: it groups each `#rrggbb` color by its leading hex digits, so it can tell red from green but not teal from navy. That is enough to flag "stuck in one mood" without pretending to be a real color-science tool.
 

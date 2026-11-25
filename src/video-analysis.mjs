@@ -274,7 +274,8 @@ export function extractPaletteOverTime(videoPath, { buckets = 6, colorsPerBucket
 /* Returns { rmsPerBucket, silentRatio, hasAudio, peakDbfs }.
  * rmsPerBucket is an array of linear RMS values (0..1-ish) sampled over the
  * whole duration at roughly `buckets` points. silentRatio is the fraction of
- * buckets below -50 dBFS (a heuristic threshold for "silence"). */
+ * buckets below -50 dBFS (a heuristic threshold for "silence"). peakDbfs is
+ * the highest sample peak (astats Peak_level) anywhere in the track. */
 export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
   assertSafeVideoPath(videoPath);
   const meta = probe(videoPath);
@@ -283,12 +284,14 @@ export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
   const bucketDurSec = meta.durationSec / buckets;
 
   // Use astats with ametadata print to get RMS level per bucket.
-  // Resample at 1/bucketDurSec then read RMS_level keys.
+  // Resample at 1/bucketDurSec then read RMS_level keys. A second ametadata
+  // prints each bucket's sample peak (one print filter takes one key).
   const r = runFfmpeg('audio analysis', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-af', `aresample=48000,asetnsamples=n=${Math.max(1, Math.round(48000 * bucketDurSec))}:p=0,` +
-           `astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level`,
+           `astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level,` +
+           `ametadata=print:key=lavfi.astats.Overall.Peak_level`,
     '-f', 'null', '-',
   ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
@@ -309,7 +312,16 @@ export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
   const silentRatio = rmsPerBucket.length
     ? rmsPerBucket.filter(db => db < -50).length / rmsPerBucket.length
     : 1;
-  const peakDbfs = rmsPerBucket.length ? Math.max(...rmsPerBucket) : -Infinity;
+  // The peak is the highest sample peak of any frame, the leftover one
+  // included. The loudest bucket's RMS is not a peak: it sits 3 dB under the
+  // peak of a pure sine and 10 dB or more under that of music, so clipped
+  // audio never reached the -1 dBFS line.
+  let peakDbfs = -Infinity;
+  const peakRe = /Peak_level=(-?[0-9.]+|-inf|nan)/gi;
+  while ((m = peakRe.exec(r.stderr))) {
+    const raw = m[1].toLowerCase();
+    peakDbfs = Math.max(peakDbfs, (raw === '-inf' || raw === 'nan') ? -120 : parseFloat(raw));
+  }
   return { rmsPerBucket, silentRatio: +silentRatio.toFixed(3), hasAudio: true, peakDbfs: +peakDbfs.toFixed(1) };
 }
 
