@@ -17,12 +17,12 @@ npm test                                              # node --test on the test/
 - Never spawn a bare program name. `git`, `ffprobe` and `yt-dlp` go through `resolveBin()` (`src/resolve-bin.mjs`), which walks PATH and skips empty, relative and current-directory entries, because Windows runs a bare name from the current directory first (a repo could ship its own `git.exe`). `bin/cli.mjs` also sets `NoDefaultCurrentDirectoryInExePath=1`. `test/resolve-bin.test.mjs` plants stand-ins to prove it.
 - Never write an unchecked value into an ffmpeg filtergraph string: a filtergraph can write files and open URLs. The scene threshold comes from a reference profile (shared JSON) or a CLI flag, so `audit()` and `detectShots()` refuse anything `sceneThresholdProblem()` (`src/video-analysis.mjs`) rejects: not a number, or not between 0 and 1. The other interpolated options go through `assertFiniteNumber()`.
 
-## Thresholds (`src/audit.mjs`, plain `if` branches)
-- CRITICAL: fade-to-black >= 40% of cuts; audio RMS stdev < 3 dB.
+## Thresholds (`src/audit.mjs`, plain `if` branches in `checklist()`)
+- CRITICAL: fade-to-black > 40% of cuts; audio RMS stdev < 3 dB.
 - WARN: fade-to-black >= 20% of cuts; RMS stdev < 6 dB; > 2 black windows longer than 1.5s; audio peak > -1 dBFS; median shot < 0.4s; silent ratio (below -50 dBFS) > 30%; resolution < 1080p.
 - NOTE: median shot > 15s; no audio track on video > 12s; < 4 distinct palette hue families.
 
-Calibrated to corporate-launch aesthetic (Google Canvas, Gemini era, NVIDIA OpenClaw). Action / music-video / art-film vibes misfire: fork and tune, don't tighten in main.
+Calibrated to corporate-launch aesthetic (Google Canvas, Gemini era, NVIDIA OpenClaw). Action / music-video / art-film vibes misfire: fork and tune, don't tighten in main. The shipped reference `demo/google-canvas.profile.json` must raise no CRITICAL on its own recorded numbers (its fade share is exactly 40%, its RMS stdev 3.11 dB): `checklist()` is a pure function so `test/audit.test.mjs` can run the profile through it without the video.
 
 ## Pre-commit hook contract (load-bearing)
 `src/install-hooks.mjs` is a thin wrapper (hook path via `git rev-parse --git-path hooks`, read, write, print); every decision is in the pure `src/hook-compose.mjs`, which `copy-tripwire` and `screenshot-tripwire` ship byte for byte as `lib/hook-compose.mjs`. Change it in all three repos together or not at all.

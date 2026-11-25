@@ -34,7 +34,10 @@ export function checklist({ meta, stats, fadeRatio, fades, audioData, palette })
     `Median shot length is ${stats.medianSec}s — very static. Works if intentional (tech-launch slow holds); flags as AI-default if unintentional.`]);
   else ok.push(`Pacing: median shot ${stats.medianSec}s, mean ${stats.meanSec}s (${stats.cutsPerSec}/s) — within human-edit range.`);
 
-  if (stats.count >= 3 && fadeRatio.fadeFraction >= 0.4) findings.push(['CRITICAL', 'fade-to-black',
+  // Strictly above 40%: the human-made reference this gate is calibrated on
+  // (demo/google-canvas.profile.json) has four of its ten cuts in black
+  // windows, exactly 0.4, and must not be blocked.
+  if (stats.count >= 3 && fadeRatio.fadeFraction > 0.4) findings.push(['CRITICAL', 'fade-to-black',
     `${fadeRatio.fadeCuts}/${stats.count} cuts (${pct(fadeRatio.fadeFraction)}) land inside black windows — reads as slideshow. Professional editorial uses hard cuts or match cuts; fade-to-black is for chapter breaks only.`]);
   else if (stats.count >= 3 && fadeRatio.fadeFraction >= 0.2) findings.push(['WARN', 'fade-to-black',
     `${pct(fadeRatio.fadeFraction)} of cuts are fade-based — consider reducing.`]);

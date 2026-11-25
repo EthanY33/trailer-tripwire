@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { audit } from "../src/audit.mjs";
+import { audit, checklist } from "../src/audit.mjs";
 import { ingest } from "../src/ingest.mjs";
 import { detectShots, detectFades, extractPalette } from "../src/video-analysis.mjs";
 
@@ -56,6 +56,37 @@ async function synthesizeSlideshow() {
 const FIXTURE = HAS_FIXTURE ? BAD_TRAILER : await synthesizeSlideshow();
 // The small synthesized clip, for the tests that run more than an audit on it.
 const SLIDESHOW = HAS_FIXTURE ? await synthesizeSlideshow() : FIXTURE;
+
+// The other fixtures are synthesized by the test that needs them. `args` are
+// the ffmpeg inputs and codec options; the output path is appended.
+const FIXTURE_DIR = await mkdtemp(path.join(tmpdir(), "tt-fixture-"));
+after(() => rm(FIXTURE_DIR, { recursive: true, force: true }));
+
+async function synthesize(name, args) {
+  const FFMPEG = (await import("ffmpeg-static")).default;
+  const out = path.join(FIXTURE_DIR, name);
+  const r = spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", "-y", ...args, out], { encoding: "utf8" });
+  assert.equal(r.status, 0, `ffmpeg failed to synthesize ${name}: ${r.stderr}`);
+  return out;
+}
+
+const X264 = ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"];
+
+// What checklist() takes, read back from a reference profile.
+function recordedNumbers(profile) {
+  return {
+    meta: profile.meta,
+    stats: profile.shots.stats,
+    fadeRatio: profile.shots.fadeVsCut,
+    fades: profile.shots.fades,
+    audioData: profile.audio,
+    palette: profile.palette,
+  };
+}
+
+function criticals(findings) {
+  return findings.filter(([level]) => level === "CRITICAL");
+}
 
 // One audit pass can take ~30s with ffmpeg-static on a cold runner.
 const TIMEOUT = 120_000;
@@ -156,6 +187,55 @@ test(
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  },
+);
+
+// The shipped reference is a human-made launch film, and its recorded fade
+// share is exactly 0.4: four of ten cuts in black windows. A gate that blocks
+// it blocks the look the thresholds were calibrated on.
+test("the shipped Google Canvas reference raises no CRITICAL on its own recorded numbers", async () => {
+  const profile = JSON.parse(await readFile(REF_PROFILE, "utf8"));
+  assert.equal(profile.shots.fadeVsCut.fadeFraction, 0.4, "the reference sits on the 40% line");
+  const { findings } = checklist(recordedNumbers(profile));
+  assert.deepEqual(criticals(findings), []);
+  assert.equal(severitiesByTag(findings).get("fade-to-black"), "WARN");
+});
+
+test("a fade share above 40% of cuts is still CRITICAL", async () => {
+  const numbers = recordedNumbers(JSON.parse(await readFile(REF_PROFILE, "utf8")));
+  // Five of twelve cuts in black windows instead of four of ten.
+  numbers.fadeRatio = { fadeCuts: 5, hardCuts: 7, fadeFraction: 0.417 };
+  numbers.stats = { ...numbers.stats, count: 13 };
+  assert.equal(severitiesByTag(checklist(numbers).findings).get("fade-to-black"), "CRITICAL");
+});
+
+test(
+  "a film with exactly 40% of its cuts in black windows gets a WARN, not a CRITICAL",
+  { timeout: TIMEOUT },
+  async () => {
+    // The shape of the reference: nine slides, six hard cuts and two fades to
+    // black, each of which is a cut into the black window and a cut out of it.
+    // Neighbouring slides differ in brightness, which is what ffmpeg's scene
+    // score reads (so lime, not green: green is as dark as red).
+    const segments = [
+      "white", "red", "yellow", "black", "lime", "red", "cyan", "black", "magenta", "white", "red",
+    ];
+    const args = [];
+    for (const c of segments) {
+      args.push("-f", "lavfi", "-i", `color=c=${c}:s=320x180:r=25:d=${c === "black" ? 0.6 : 1}`);
+    }
+    const inputs = segments.map((_, i) => `[${i}:v]`).join("");
+    args.push("-filter_complex", `${inputs}concat=n=${segments.length}:v=1:a=0[v]`, "-map", "[v]", ...X264);
+    const film = await synthesize("four-fades-in-ten-cuts.mp4", args);
+
+    const result = audit({ videoPath: film, verbose: false });
+    assert.match(
+      result.report,
+      /Fade-based transitions:\*\* 4\/11 \(40\.0%\)/,
+      `the fixture must sit on the 40% line:\n${result.report}`,
+    );
+    assert.equal(severitiesByTag(result.findings).get("fade-to-black"), "WARN");
+    assert.equal(result.hasCritical, false);
   },
 );
 
