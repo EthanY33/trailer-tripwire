@@ -216,3 +216,24 @@ test("ingest never runs a yt-dlp planted in the current directory", () => {
   const r = node(dir, [child, path.join(dir, "out")], env);
   assert.match(r.out, /^ERR yt-dlp not found/, r.out);
 });
+
+test("check with FFMPEG_BIN as a program name never runs an ffprobe or ffmpeg planted in the repository", async () => {
+  const FFMPEG = (await import("ffmpeg-static")).default;
+  const clip = path.join(ROOT, "short-clip.mp4");
+  const made = spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", "-y",
+    "-f", "lavfi", "-i", "color=c=red:s=160x90:r=10:d=1",
+    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", clip], { encoding: "utf8" });
+  assert.equal(made.status, 0, made.stderr);
+
+  const repo = makeRepo();
+  fs.copyFileSync(clip, path.join(repo, "clip.mp4"));
+  git(repo, "add", "--", "clip.mp4");
+  plant(repo, "ffprobe");
+  plant(repo, "ffmpeg");
+
+  // The real ffmpeg is reachable only through PATH, after the leading ".".
+  const env = cwdFirstEnv(path.dirname(FFMPEG) + path.delimiter + process.env.PATH, { FFMPEG_BIN: "ffmpeg" });
+  const r = node(repo, [CLI, "check"], env);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /no CRITICAL findings/, r.out);
+});

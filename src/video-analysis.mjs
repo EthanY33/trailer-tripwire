@@ -10,8 +10,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { resolveBin } from './resolve-bin.mjs';
 
-const FFMPEG = (await import('ffmpeg-static')).default;
-const FFPROBE = FFMPEG.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1');
+// ffmpeg-static takes its path from FFMPEG_BIN when that is set, and the value
+// may be a bare program name. A bare name is resolved against PATH here (never
+// the current directory) so that no spawn below receives one. FFMPEG is null
+// when there is no binary to run.
+const rawFfmpeg = (await import('ffmpeg-static')).default;
+export const FFMPEG = rawFfmpeg && !/[\\/]/.test(rawFfmpeg) ? resolveBin(rawFfmpeg) : rawFfmpeg;
+const FFPROBE = FFMPEG ? FFMPEG.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1') : null;
+
+function ffmpegBin() {
+  if (!FFMPEG) throw new Error('the ffmpeg binary is missing');
+  return FFMPEG;
+}
 
 /* Reject paths that would be misread as flags or protocol URIs by ffmpeg/ffprobe.
  * Windows drive letters (C:\..., D:/...) are allowed. */
@@ -80,7 +90,7 @@ export function probe(videoPath) {
 }
 
 function probeWithFfmpeg(videoPath) {
-  const r = spawnSync(FFMPEG, ['-hide_banner', '-i', videoPath], { encoding: 'utf8' });
+  const r = spawnSync(ffmpegBin(), ['-hide_banner', '-i', videoPath], { encoding: 'utf8' });
   const text = r.stderr || '';
   const dur = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(text);
   if (!dur) {
@@ -121,7 +131,7 @@ function evalFrameRate(s) {
  * minimal false positives on slow pans. */
 export function detectShots(videoPath, threshold = 0.15) {
   assertSafeVideoPath(videoPath);
-  const r = spawnSync(FFMPEG, [
+  const r = spawnSync(ffmpegBin(), [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-vf', `select='gt(scene,${threshold})',showinfo`,
@@ -141,7 +151,7 @@ export function detectShots(videoPath, threshold = 0.15) {
  * d = minimum duration of dark window in seconds to count as a fade. */
 export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
   assertSafeVideoPath(videoPath);
-  const r = spawnSync(FFMPEG, [
+  const r = spawnSync(ffmpegBin(), [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-vf', `blackdetect=d=${minDurSec}:pic_th=${picTh}`,
@@ -166,7 +176,7 @@ export function extractPalette(videoPath, { maxColors = 8, startSec = 0, endSec 
     const trimArgs = endSec != null
       ? ['-ss', String(startSec), '-to', String(endSec)]
       : startSec > 0 ? ['-ss', String(startSec)] : [];
-    const r = spawnSync(FFMPEG, [
+    const r = spawnSync(ffmpegBin(), [
       '-hide_banner', '-nostats',
       ...trimArgs,
       '-i', videoPath,
@@ -183,7 +193,7 @@ export function extractPalette(videoPath, { maxColors = 8, startSec = 0, endSec 
 /* palettegen writes a tiny PNG (maxColors × 1 px). We read it with raw ffmpeg
  * to avoid pulling in a PNG decoder. Round-trip via rawvideo. */
 function readPalettePng(pngPath, maxColors) {
-  const r = spawnSync(FFMPEG, [
+  const r = spawnSync(ffmpegBin(), [
     '-hide_banner', '-nostats',
     '-i', pngPath,
     '-f', 'rawvideo', '-pix_fmt', 'rgb24',
@@ -234,7 +244,7 @@ export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
 
   // Use astats with ametadata print to get RMS level per bucket.
   // Resample at 1/bucketDurSec then read RMS_level keys.
-  const r = spawnSync(FFMPEG, [
+  const r = spawnSync(ffmpegBin(), [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-af', `aresample=48000,asetnsamples=n=${Math.max(1, Math.round(48000 * bucketDurSec))}:p=0,` +

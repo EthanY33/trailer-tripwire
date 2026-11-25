@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import ffmpegPath from 'ffmpeg-static';
+import { FFMPEG } from './video-analysis.mjs';
 import { audit } from './audit.mjs';
 import { resolveBin } from './resolve-bin.mjs';
 
@@ -155,10 +155,11 @@ export function checkStaged({ dir = null, ext = ['mp4', 'webm', 'mov', 'mkv'], c
 
   // ffmpeg-static downloads its binary in an install script, so an install
   // with scripts disabled leaves the package without one. Say that once,
-  // instead of one obscure error per file. (FFMPEG_BIN may hold a program
-  // name instead of a path; that is left to the PATH lookup.)
-  if (!ffmpegPath || (/[\\/]/.test(ffmpegPath) && !fs.existsSync(ffmpegPath))) {
-    const where = ffmpegPath || 'ffmpeg-static has no build for this platform';
+  // instead of one obscure error per file. FFMPEG is already resolved to an
+  // absolute path (null when FFMPEG_BIN names a program that is not on PATH).
+  if (!FFMPEG || !fs.existsSync(FFMPEG)) {
+    const named = process.env.FFMPEG_BIN;
+    const where = FFMPEG || (named ? `${named} was not found on PATH` : 'ffmpeg-static has no build for this platform');
     console.error(`trailer-tripwire: the ffmpeg binary is missing (${where}). Try \`npm rebuild ffmpeg-static\`.`);
     return notAudited(trailers.length);
   }
