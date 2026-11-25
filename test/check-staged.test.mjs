@@ -412,3 +412,26 @@ test("a run with no staged video in scope prints one skipping line and exits 0",
   assert.equal(otherExt.exitCode, 0, otherExt.out);
   assert.equal(otherExt.out, "trailer-tripwire: no staged video files - skipping");
 });
+
+test("an ffmpeg pass that is killed blocks the commit instead of reading as a clean video", { timeout: TIMEOUT }, async () => {
+  const cp = (await import("node:child_process")).default;
+  const { syncBuiltinESMExports } = await import("node:module");
+  const repo = makeRepo();
+  stage(repo, "brand/trailers/slideshow.mp4", SLIDESHOW);
+
+  // A 1 ms timeout makes Node end the fade-detection child with SIGTERM.
+  const real = cp.spawnSync;
+  cp.spawnSync = (bin, args, opts) => real(bin, args,
+    args.some((a) => String(a).includes("blackdetect")) ? { ...opts, timeout: 1 } : opts);
+  syncBuiltinESMExports();
+  let r;
+  try {
+    r = check({ cwd: repo });
+  } finally {
+    cp.spawnSync = real;
+    syncBuiltinESMExports();
+  }
+  assert.equal(r.exitCode, 2, r.out);
+  assert.equal(r.errored, 1, r.out);
+  assert.match(r.out, /slideshow.mp4: could not be audited: fade detection/);
+});

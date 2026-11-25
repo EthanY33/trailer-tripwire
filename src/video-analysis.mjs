@@ -23,6 +23,19 @@ function ffmpegBin() {
   return FFMPEG;
 }
 
+// Run one ffmpeg pass to completion. A pass that could not start, was killed
+// or failed must not read as 'found nothing': check would then report a
+// video as audited when it was not.
+function runFfmpeg(what, args, opts) {
+  const r = spawnSync(ffmpegBin(), args, opts);
+  if (r.error) throw new Error(`${what}: ffmpeg did not finish: ${r.error.message}`);
+  if (r.status !== 0) {
+    const why = r.signal ? `was killed by ${r.signal}` : `exited with status ${r.status}`;
+    throw new Error(`${what}: ffmpeg ${why}: ${String(r.stderr || '').slice(-400)}`);
+  }
+  return r;
+}
+
 /* Reject paths that would be misread as flags or protocol URIs by ffmpeg/ffprobe.
  * Windows drive letters (C:\..., D:/...) are allowed. */
 function assertSafeVideoPath(p) {
@@ -131,7 +144,7 @@ function evalFrameRate(s) {
  * minimal false positives on slow pans. */
 export function detectShots(videoPath, threshold = 0.15) {
   assertSafeVideoPath(videoPath);
-  const r = spawnSync(ffmpegBin(), [
+  const r = runFfmpeg('shot detection', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-vf', `select='gt(scene,${threshold})',showinfo`,
@@ -151,7 +164,7 @@ export function detectShots(videoPath, threshold = 0.15) {
  * d = minimum duration of dark window in seconds to count as a fade. */
 export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
   assertSafeVideoPath(videoPath);
-  const r = spawnSync(ffmpegBin(), [
+  const r = runFfmpeg('fade detection', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-vf', `blackdetect=d=${minDurSec}:pic_th=${picTh}`,
@@ -244,7 +257,7 @@ export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
 
   // Use astats with ametadata print to get RMS level per bucket.
   // Resample at 1/bucketDurSec then read RMS_level keys.
-  const r = spawnSync(ffmpegBin(), [
+  const r = runFfmpeg('audio analysis', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-af', `aresample=48000,asetnsamples=n=${Math.max(1, Math.round(48000 * bucketDurSec))}:p=0,` +
