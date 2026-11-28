@@ -4,13 +4,14 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import { resolveBin } from './resolve-bin.mjs';
 
 /* Prefer a locally-downloaded yt-dlp.exe; fall back to system one. */
 function resolveYtDlp() {
   const candidates = [
     path.join(os.tmpdir(), 'yt-dlp.exe'),  // first-run install target
-    'yt-dlp',                               // system PATH
-  ];
+    resolveBin('yt-dlp'),                   // system PATH, as an absolute path (see resolve-bin.mjs)
+  ].filter(Boolean);
   for (const bin of candidates) {
     const r = spawnSync(bin, ['--version'], { encoding: 'utf8' });
     if (r.status === 0) return bin;

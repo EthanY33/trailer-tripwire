@@ -11,7 +11,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   probe, detectShots, detectFades, extractPaletteOverTime,
-  analyzeAudio, shotStats, fadeVsCutRatio,
+  analyzeAudio, shotStats, fadeVsCutRatio, sceneThresholdProblem,
 } from './video-analysis.mjs';
 
 function stdev(arr) {
@@ -22,32 +22,22 @@ function stdev(arr) {
 }
 function pct(x) { return (x * 100).toFixed(1) + '%'; }
 
-export function audit({ videoPath, refPath = null, outPath = null, verbose = true }) {
-  if (!videoPath) throw new Error('usage: audit <video> [--ref <profile.json>] [--out <report.md>]');
-  const abs = path.resolve(videoPath);
-  if (!fs.existsSync(abs)) throw new Error(`not found: ${abs}`);
+/* The buckets the RMS spread is measured over: the audible ones, at or above
+ * the -50 dBFS line the silent ratio uses. A silent bucket (an encoder's
+ * tail, a closing fade) is dead air, not dynamics: counted, a single one
+ * makes a flat drone read as expressive. With fewer than three audible
+ * buckets there is no spread to measure, and the track is judged as it
+ * always was, over every bucket above digital silence. */
+function dynamicsBuckets(rmsPerBucket) {
+  const audible = rmsPerBucket.filter(x => x >= -50);
+  return audible.length >= 3 ? audible : rmsPerBucket.filter(x => x > -100);
+}
 
-  let ref = null;
-  if (refPath) {
-    ref = JSON.parse(fs.readFileSync(path.resolve(refPath), 'utf8'));
-    if (ref.schema !== 'reference-profile/v1') throw new Error(`invalid profile schema: ${ref.schema}`);
-  }
-
-  const sceneThreshold = ref ? ref.shots.sceneThreshold : 0.15;
-
-  if (verbose) console.log('→ analyzing', path.relative(process.cwd(), abs));
-  const meta = probe(abs);
-  const cuts = detectShots(abs, sceneThreshold);
-  const stats = shotStats(cuts, meta.durationSec);
-  const fades = detectFades(abs);
-  const fadeRatio = fadeVsCutRatio(cuts, fades);
-  const palette = extractPaletteOverTime(abs, { buckets: 6, colorsPerBucket: 5 });
-  const audioData = analyzeAudio(abs, { buckets: Math.max(30, Math.round(meta.durationSec)) });
-
+/* The absolute checklist. A pure function of the measured numbers, so that a
+ * recorded reference profile can be run through it without its video. */
+export function checklist({ meta, stats, fadeRatio, fades, audioData, palette }) {
   const findings = [];
   const ok = [];
-
-  /* ─ Absolute checklist ─ */
 
   if (stats.medianSec < 0.4) findings.push(['WARN', 'pacing',
     `Median shot length is ${stats.medianSec}s — under 0.4s reads as music-video churn, inappropriate for a studio launch.`]);
@@ -55,7 +45,10 @@ export function audit({ videoPath, refPath = null, outPath = null, verbose = tru
     `Median shot length is ${stats.medianSec}s — very static. Works if intentional (tech-launch slow holds); flags as AI-default if unintentional.`]);
   else ok.push(`Pacing: median shot ${stats.medianSec}s, mean ${stats.meanSec}s (${stats.cutsPerSec}/s) — within human-edit range.`);
 
-  if (stats.count >= 3 && fadeRatio.fadeFraction >= 0.4) findings.push(['CRITICAL', 'fade-to-black',
+  // Strictly above 40%: the human-made reference this gate is calibrated on
+  // (demo/google-canvas.profile.json) has four of its ten cuts in black
+  // windows, exactly 0.4, and must not be blocked.
+  if (stats.count >= 3 && fadeRatio.fadeFraction > 0.4) findings.push(['CRITICAL', 'fade-to-black',
     `${fadeRatio.fadeCuts}/${stats.count} cuts (${pct(fadeRatio.fadeFraction)}) land inside black windows — reads as slideshow. Professional editorial uses hard cuts or match cuts; fade-to-black is for chapter breaks only.`]);
   else if (stats.count >= 3 && fadeRatio.fadeFraction >= 0.2) findings.push(['WARN', 'fade-to-black',
     `${pct(fadeRatio.fadeFraction)} of cuts are fade-based — consider reducing.`]);
@@ -71,8 +64,7 @@ export function audit({ videoPath, refPath = null, outPath = null, verbose = tru
   else ok.push(`Audio density: ${pct(audioData.silentRatio)} silent (under -50dBFS) — filled.`);
 
   if (meta.hasAudio) {
-    const rmsValid = audioData.rmsPerBucket.filter(x => x > -100);
-    const rmsStdev = stdev(rmsValid);
+    const rmsStdev = stdev(dynamicsBuckets(audioData.rmsPerBucket));
     if (rmsStdev < 3) findings.push(['CRITICAL', 'audio-flat',
       `Audio RMS stdev is ${rmsStdev.toFixed(2)} dB — almost no dynamic variation. This is the procedural-drone tell. Composed music swings 8-15 dB over its duration.`]);
     else if (rmsStdev < 6) findings.push(['WARN', 'audio-flat',
@@ -93,6 +85,37 @@ export function audit({ videoPath, refPath = null, outPath = null, verbose = tru
   const uniqHues = new Set(allColors.map(c => c.slice(0, 4))).size;
   if (uniqHues < 4) findings.push(['NOTE', 'palette',
     `Only ~${uniqHues} distinct hue families across the whole video. Monochrome can be intentional, but often reads as "stuck in one mood."`]);
+
+  return { findings, ok };
+}
+
+export function audit({ videoPath, refPath = null, outPath = null, verbose = true }) {
+  if (!videoPath) throw new Error('usage: audit <video> [--ref <profile.json>] [--out <report.md>]');
+  const abs = path.resolve(videoPath);
+  if (!fs.existsSync(abs)) throw new Error(`not found: ${abs}`);
+
+  let ref = null;
+  if (refPath) {
+    ref = JSON.parse(fs.readFileSync(path.resolve(refPath), 'utf8'));
+    if (ref.schema !== 'reference-profile/v1') throw new Error(`invalid profile schema: ${ref.schema}`);
+    // The threshold is written into ffmpeg's filtergraph, and a profile is a
+    // shared JSON file: anything but a number in range stops here.
+    const badThreshold = sceneThresholdProblem(ref.shots?.sceneThreshold);
+    if (badThreshold) throw new Error(`invalid profile: shots.sceneThreshold ${badThreshold}`);
+  }
+
+  const sceneThreshold = ref ? ref.shots.sceneThreshold : 0.15;
+
+  if (verbose) console.log('→ analyzing', path.relative(process.cwd(), abs));
+  const meta = probe(abs);
+  const cuts = detectShots(abs, sceneThreshold);
+  const stats = shotStats(cuts, meta.durationSec);
+  const fades = detectFades(abs);
+  const fadeRatio = fadeVsCutRatio(cuts, fades);
+  const palette = extractPaletteOverTime(abs, { buckets: 6, colorsPerBucket: 5 });
+  const audioData = analyzeAudio(abs, { buckets: Math.max(30, Math.round(meta.durationSec)) });
+
+  const { findings, ok } = checklist({ meta, stats, fadeRatio, fades, audioData, palette });
 
   /* ─ Reference deltas ─ */
 
@@ -116,8 +139,8 @@ export function audit({ videoPath, refPath = null, outPath = null, verbose = tru
     }
 
     if (ref.audio.hasAudio && audioData.hasAudio) {
-      const refStdev = stdev((ref.audio.rmsPerBucket || []).filter(x => x > -100));
-      const thisStdev = stdev(audioData.rmsPerBucket.filter(x => x > -100));
+      const refStdev = stdev(dynamicsBuckets(ref.audio.rmsPerBucket || []));
+      const thisStdev = stdev(dynamicsBuckets(audioData.rmsPerBucket));
       if (refStdev > 0 && thisStdev < refStdev * 0.5) {
         refDelta.push(['WARN', 'vs-ref-audio-dynamics',
           `Audio dynamic range ${thisStdev.toFixed(1)} dB is less than half the reference's ${refStdev.toFixed(1)} dB — your audio is flatter than the inspiration.`]);

@@ -11,12 +11,17 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   probe, detectShots, detectFades, extractPaletteOverTime,
-  analyzeAudio, shotStats, fadeVsCutRatio,
+  analyzeAudio, shotStats, fadeVsCutRatio, sceneThresholdProblem,
 } from './video-analysis.mjs';
 import { downloadVideo, extractVideoId } from './yt-download.mjs';
 
 export async function ingest({ input, name, outDir, threshold = 0.15 }) {
   if (!input) throw new Error('usage: ingest <url-or-path> [--name <slug>] [--out <dir>]');
+  // A mistyped --threshold parses to NaN, which JSON would write as null.
+  // Refuse it before anything is downloaded or written, so that a profile
+  // with an unusable sceneThreshold never exists.
+  const badThreshold = sceneThresholdProblem(threshold);
+  if (badThreshold) throw new Error(`--threshold ${badThreshold}`);
   const refsDir = path.resolve(outDir || 'content-refs');
   fs.mkdirSync(refsDir, { recursive: true });
 

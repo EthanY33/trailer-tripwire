@@ -28,10 +28,10 @@ Measurable pattern tells, derived empirically by comparing an AI-generated trail
 
 | Check | Severity | Threshold | What it catches |
 |---|---|---|---|
-| **Fade-to-black fraction** | CRITICAL / WARN | >= 40% / >= 20% of cuts | Slideshow tell. AI loves fade-between-beats; human editors use hard cuts and match cuts. Needs >= 3 detected shots to fire. |
-| **Audio RMS stdev** | CRITICAL / WARN | < 3 dB / < 6 dB | Procedural-drone tell. Composed music swings 8-15 dB over its run; drones stay flat. |
+| **Fade-to-black fraction** | CRITICAL / WARN | > 40% / >= 20% of cuts | Slideshow tell. AI loves fade-between-beats; human editors use hard cuts and match cuts. Needs >= 3 detected shots to fire. Exactly 40% is a WARN: the Google Canvas reference sits there. |
+| **Audio RMS stdev** | CRITICAL / WARN | < 3 dB / < 6 dB | Procedural-drone tell. Composed music swings 8-15 dB over its run; drones stay flat. Measured over the audible buckets (at or above -50 dBFS), so a silent tail or a closing fade does not pass for dynamics. |
 | **Long black windows** | WARN | > 2 windows longer than 1.5s | Sparse, unfinished, or padded. |
-| **Audio peak** | WARN | > -1 dBFS | Clipping risk. Streaming platforms target a -1 dBTP true-peak ceiling. |
+| **Audio peak** | WARN | sample peak > -1 dBFS | Clipping risk. Streaming platforms target a -1 dBTP true-peak ceiling. |
 | **Median shot length** | WARN / NOTE | < 0.4s (WARN), > 15s (NOTE) | Outside human-editor range: music-video churn on one end, slideshow on the other. |
 | **Silent ratio** | WARN | > 30% of buckets below -50 dBFS | Dead air. Composed trailer music carries continuously. |
 | **Resolution** | WARN | frame width < 1080 px | Below typical platform minimums. |
@@ -103,7 +103,7 @@ Or from a local file:
 trailer-tripwire ingest ./ref.mp4 --name my-reference --out ./refs
 ```
 
-The profile is a small JSON (usually 3-4 KB) with duration, resolution, shot cuts, fade windows, a 6-bucket palette over time, and a 60-bucket audio RMS curve. It is stamped with the `reference-profile/v1` schema, which `audit --ref` validates before use.
+The profile is a small JSON (usually 3-4 KB) with duration, resolution, shot cuts, fade windows, a 6-bucket palette over time, and a 60-bucket audio RMS curve. It is stamped with the `reference-profile/v1` schema, which `audit --ref` validates before use, and a profile whose `shots.sceneThreshold` is not a number between 0 and 1 is refused.
 
 ### Audit a trailer
 
@@ -126,11 +126,25 @@ Exit codes: `0` if no CRITICAL findings, `2` if any. Pipe into CI or wrap in a s
 # Install the hook in the current repo
 trailer-tripwire install-hooks
 
-# Scope it to a specific directory prefix (recommended, avoids false-positives on gameplay clips, screen recordings, etc.)
+# Scope it to one directory (recommended, avoids false-positives on gameplay clips, screen recordings, etc.)
 trailer-tripwire install-hooks --dir brand/trailers/
 ```
 
-After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked. The hook is marked `# trailer-tripwire:v1` and is idempotent: it replaces its own previous version but refuses to clobber an unrelated pre-commit hook.
+After install, every `git commit` runs `trailer-tripwire check` on the staged set. If any staged video file has CRITICAL findings, the commit is blocked. The check audits the staged content, which is what the commit records, not the file in the working tree: after a blocked commit, re-export and `git add` the file again before you retry. A staged video that cannot be audited (a corrupt or truncated file, a missing ffmpeg binary) blocks the commit too. The gate never passes a file it could not look at.
+
+The installer owns one block in the pre-commit hook and nothing else:
+
+```sh
+# trailer-tripwire:v1
+npx --no -- trailer-tripwire check --dir 'brand/trailers/' || exit $?
+# trailer-tripwire:v1 end
+```
+
+Running `install-hooks` again (for example to change `--dir`) rewrites only the lines between those two markers. Lines you wrote yourself and the blocks of `screenshot-tripwire` and `copy-tripwire` are left as they are, in any install order. A hook written by an older version of any of the three is converted to this block format with every gate it had. A pre-commit hook that has nothing to do with the tripwires is never modified: the installer exits 1 and prints the block so you can paste it in by hand.
+
+The hook runs the check through `npx --no`, so it only ever runs a `trailer-tripwire` that is already installed. If the package is missing (a fresh `git worktree`, a deleted `node_modules`), the commit fails instead of npx downloading a package by that name from the npm registry. Install it, or bypass that one commit.
+
+In a hand-written hook the block is appended at the end, so a hook that ends in `exit` or `exec` needs the block moved above that line (the installer warns). An indented `trailer-tripwire` command inside an `if` or a function is left alone, with a warning.
 
 Bypass: `git commit --no-verify` (standard git).
 
@@ -140,12 +154,16 @@ Bypass: `git commit --no-verify` (standard git).
 # Scan all staged videos (default extensions: mp4, webm, mov, mkv)
 trailer-tripwire check
 
-# Scope to a path
+# Scope to one directory
 trailer-tripwire check --dir brand/trailers/
 
 # Custom extensions
 trailer-tripwire check --ext mp4,webm
 ```
+
+`--dir` names a directory relative to the repository root, whatever directory you run the check from. `brand/trailers`, `brand/trailers/` and `./brand/trailers/` are the same scope, and none of them covers `brand/trailers-raw/`. An absolute path works if it is inside the repository. When no staged video is in scope, the check prints one `skipping` line and exits `0`.
+
+Exit codes: `0` if every staged video passes (or none is staged), `1` if any has CRITICAL findings, `2` if a staged video could not be audited, `--dir` points outside the repository, or git failed.
 
 ---
 
@@ -156,7 +174,7 @@ Everything sits on top of the bundled `ffmpeg-static`. `ffmpeg-static` ships no 
 - **Shot detection** runs ffmpeg's `select='gt(scene,<threshold>)'` filter (default threshold `0.15`, calibrated so motion-graphics dissolves and hard gameplay cuts both register) and reads the `pts_time` markers.
 - **Fade detection** runs `blackdetect` and reports near-black windows; a cut is counted as fade-based when it lands inside (or at the edge of) one of those windows.
 - **Palette over time** slices the video into 6 time buckets and runs `palettegen` on each, reading the resulting tiny PNG back through raw ffmpeg to avoid pulling in a PNG decoder.
-- **Audio analysis** resamples to 48 kHz, chunks into buckets, and reads per-bucket `RMS_level` from the `astats` filter to derive dynamic range, silent ratio, and peak.
+- **Audio analysis** resamples to 48 kHz, chunks into buckets, and reads per-bucket `RMS_level` and `Peak_level` from the `astats` filter: the RMS levels give dynamic range and silent ratio, the highest `Peak_level` is the sample peak.
 
 The hue-family count is deliberately coarse: it groups each `#rrggbb` color by its leading hex digits, so it can tell red from green but not teal from navy. That is enough to flag "stuck in one mood" without pretending to be a real color-science tool.
 
@@ -179,7 +197,7 @@ Three calibration moves:
 ## Known limitations
 
 - **Procedural audio with accents passes the flat-drone check.** If your "procedural" audio includes sharp SFX hits (explosions, UI ticks), the RMS stdev reads as 8+ dB even though the underlying bed is a sine wave. The check catches pure drones, not drone plus accent.
-- **Scene detection misses dissolves on same-framed content.** If two shots are cut together but have similar composition and motion, ffmpeg's scene filter may not trigger. Lower `--threshold` in `ingest` catches more, at the cost of more false positives on camera pans.
+- **Scene detection misses dissolves on same-framed content.** If two shots are cut together but have similar composition and motion, ffmpeg's scene filter may not trigger. Lower `--threshold` in `ingest` (a number between 0 and 1, default `0.15`; anything else is refused and no profile is written) catches more, at the cost of more false positives on camera pans.
 - **Palette hue detection is coarse.** It buckets by the leading hex digits of each color. It can't distinguish teal from navy; it can distinguish red from green.
 - **YouTube downloads require yt-dlp.** The `ingest` command shells out to `yt-dlp`, which is maintained separately. If YouTube breaks the API surface, you'll need to update your yt-dlp binary.
 

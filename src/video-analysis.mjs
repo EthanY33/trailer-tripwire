@@ -8,9 +8,33 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import { resolveBin } from './resolve-bin.mjs';
 
-const FFMPEG = (await import('ffmpeg-static')).default;
-const FFPROBE = FFMPEG.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1');
+// ffmpeg-static takes its path from FFMPEG_BIN when that is set, and the value
+// may be a bare program name. A bare name is resolved against PATH here (never
+// the current directory) so that no spawn below receives one. FFMPEG is null
+// when there is no binary to run.
+const rawFfmpeg = (await import('ffmpeg-static')).default;
+export const FFMPEG = rawFfmpeg && !/[\\/]/.test(rawFfmpeg) ? resolveBin(rawFfmpeg) : rawFfmpeg;
+const FFPROBE = FFMPEG ? FFMPEG.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1') : null;
+
+function ffmpegBin() {
+  if (!FFMPEG) throw new Error('the ffmpeg binary is missing');
+  return FFMPEG;
+}
+
+// Run one ffmpeg pass to completion. A pass that could not start, was killed
+// or failed must not read as 'found nothing': check would then report a
+// video as audited when it was not.
+function runFfmpeg(what, args, opts) {
+  const r = spawnSync(ffmpegBin(), args, opts);
+  if (r.error) throw new Error(`${what}: ffmpeg did not finish: ${r.error.message}`);
+  if (r.status !== 0) {
+    const why = r.signal ? `was killed by ${r.signal}` : `exited with status ${r.status}`;
+    throw new Error(`${what}: ffmpeg ${why}: ${String(r.stderr || '').slice(-400)}`);
+  }
+  return r;
+}
 
 /* Reject paths that would be misread as flags or protocol URIs by ffmpeg/ffprobe.
  * Windows drive letters (C:\..., D:/...) are allowed. */
@@ -29,12 +53,46 @@ function assertSafeVideoPath(p) {
   }
 }
 
+/* Numbers that are written into an ffmpeg filtergraph string. A filtergraph
+ * is a language of its own (other filters write files and open URLs), so only
+ * a plain number may reach it. A reference profile is shared JSON and can
+ * hold anything; a mistyped CLI flag parses to NaN. */
+function shown(x) {
+  return typeof x === 'string' ? JSON.stringify(x) : String(x);
+}
+
+function assertFiniteNumber(name, x) {
+  if (typeof x !== 'number' || !Number.isFinite(x)) {
+    throw new Error(`${name} must be a finite number (got ${shown(x)})`);
+  }
+}
+
+/* Why `x` cannot be used as a scene threshold, or null when it can. Scene
+ * scores run from 0 to 1: 0 selects every frame and 1 is never exceeded, so
+ * both ends are out. */
+export function sceneThresholdProblem(x) {
+  if (typeof x === 'number' && x > 0 && x < 1) return null;
+  return `must be a number between 0 and 1 (got ${shown(x)})`;
+}
+
 /* ─────────────────────────────────────── probe ─── */
+
+/* A container without a duration (a recording that was never finalized, a
+ * file written to a pipe) cannot be cut into time buckets. Say so here,
+ * before NaN reaches an ffmpeg option and comes back as an obscure error. */
+function noDurationError(videoPath) {
+  return new Error(
+    `no duration in the container of ${videoPath} (a recording that was never finalized?). ` +
+    'Remux it first, for example: ffmpeg -i <file> -c copy <new file>',
+  );
+}
 
 export function probe(videoPath) {
   assertSafeVideoPath(videoPath);
   // Use system ffprobe if available, else fall back to the one alongside ffmpeg-static.
-  const candidates = [FFPROBE, 'ffprobe'];
+  // The system one is spawned by its absolute path from PATH, never by bare
+  // name: see resolve-bin.mjs.
+  const candidates = [FFPROBE, resolveBin('ffprobe')].filter(Boolean);
   for (const bin of candidates) {
     const r = spawnSync(bin, [
       '-v', 'error', '-print_format', 'json',
@@ -45,8 +103,10 @@ export function probe(videoPath) {
       const data = JSON.parse(r.stdout);
       const v = data.streams.find(s => s.codec_type === 'video');
       const a = data.streams.find(s => s.codec_type === 'audio');
+      const durationSec = parseFloat(data.format.duration);
+      if (!Number.isFinite(durationSec)) throw noDurationError(videoPath);
       return {
-        durationSec: parseFloat(data.format.duration),
+        durationSec,
         width: v ? v.width : null,
         height: v ? v.height : null,
         fps: v ? evalFrameRate(v.r_frame_rate) : null,
@@ -65,10 +125,13 @@ export function probe(videoPath) {
 }
 
 function probeWithFfmpeg(videoPath) {
-  const r = spawnSync(FFMPEG, ['-hide_banner', '-i', videoPath], { encoding: 'utf8' });
+  const r = spawnSync(ffmpegBin(), ['-hide_banner', '-i', videoPath], { encoding: 'utf8' });
   const text = r.stderr || '';
   const dur = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(text);
-  if (!dur) return null;
+  if (!dur) {
+    if (/Duration:\s*N\/A/.test(text)) throw noDurationError(videoPath);
+    return null;
+  }
   const videoLine = text.split('\n').find(l => /Stream #\d+:\d+.*: Video: /.test(l)) || '';
   const audioLine = text.split('\n').find(l => /Stream #\d+:\d+.*: Audio: /.test(l)) || '';
   const dims = /, (\d{2,5})x(\d{2,5})[ ,]/.exec(videoLine);
@@ -103,7 +166,9 @@ function evalFrameRate(s) {
  * minimal false positives on slow pans. */
 export function detectShots(videoPath, threshold = 0.15) {
   assertSafeVideoPath(videoPath);
-  const r = spawnSync(FFMPEG, [
+  const badThreshold = sceneThresholdProblem(threshold);
+  if (badThreshold) throw new Error(`scene threshold ${badThreshold}`);
+  const r = runFfmpeg('shot detection', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-vf', `select='gt(scene,${threshold})',showinfo`,
@@ -123,7 +188,9 @@ export function detectShots(videoPath, threshold = 0.15) {
  * d = minimum duration of dark window in seconds to count as a fade. */
 export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
   assertSafeVideoPath(videoPath);
-  const r = spawnSync(FFMPEG, [
+  assertFiniteNumber('minDurSec', minDurSec);
+  assertFiniteNumber('picTh', picTh);
+  const r = runFfmpeg('fade detection', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-vf', `blackdetect=d=${minDurSec}:pic_th=${picTh}`,
@@ -143,12 +210,13 @@ export function detectFades(videoPath, { minDurSec = 0.2, picTh = 0.98 } = {}) {
  * Returns array of #rrggbb hex strings sorted by frequency. */
 export function extractPalette(videoPath, { maxColors = 8, startSec = 0, endSec = null } = {}) {
   assertSafeVideoPath(videoPath);
+  assertFiniteNumber('maxColors', maxColors);
   const tmp = path.join(os.tmpdir(), `palette-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
   try {
     const trimArgs = endSec != null
       ? ['-ss', String(startSec), '-to', String(endSec)]
       : startSec > 0 ? ['-ss', String(startSec)] : [];
-    const r = spawnSync(FFMPEG, [
+    const r = spawnSync(ffmpegBin(), [
       '-hide_banner', '-nostats',
       ...trimArgs,
       '-i', videoPath,
@@ -165,7 +233,7 @@ export function extractPalette(videoPath, { maxColors = 8, startSec = 0, endSec 
 /* palettegen writes a tiny PNG (maxColors × 1 px). We read it with raw ffmpeg
  * to avoid pulling in a PNG decoder. Round-trip via rawvideo. */
 function readPalettePng(pngPath, maxColors) {
-  const r = spawnSync(FFMPEG, [
+  const r = spawnSync(ffmpegBin(), [
     '-hide_banner', '-nostats',
     '-i', pngPath,
     '-f', 'rawvideo', '-pix_fmt', 'rgb24',
@@ -206,7 +274,8 @@ export function extractPaletteOverTime(videoPath, { buckets = 6, colorsPerBucket
 /* Returns { rmsPerBucket, silentRatio, hasAudio, peakDbfs }.
  * rmsPerBucket is an array of linear RMS values (0..1-ish) sampled over the
  * whole duration at roughly `buckets` points. silentRatio is the fraction of
- * buckets below -50 dBFS (a heuristic threshold for "silence"). */
+ * buckets below -50 dBFS (a heuristic threshold for "silence"). peakDbfs is
+ * the highest sample peak (astats Peak_level) anywhere in the track. */
 export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
   assertSafeVideoPath(videoPath);
   const meta = probe(videoPath);
@@ -215,12 +284,14 @@ export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
   const bucketDurSec = meta.durationSec / buckets;
 
   // Use astats with ametadata print to get RMS level per bucket.
-  // Resample at 1/bucketDurSec then read RMS_level keys.
-  const r = spawnSync(FFMPEG, [
+  // Resample at 1/bucketDurSec then read RMS_level keys. A second ametadata
+  // prints each bucket's sample peak (one print filter takes one key).
+  const r = runFfmpeg('audio analysis', [
     '-hide_banner', '-nostats',
     '-i', videoPath,
     '-af', `aresample=48000,asetnsamples=n=${Math.max(1, Math.round(48000 * bucketDurSec))}:p=0,` +
-           `astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level`,
+           `astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level,` +
+           `ametadata=print:key=lavfi.astats.Overall.Peak_level`,
     '-f', 'null', '-',
   ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
@@ -233,10 +304,24 @@ export function analyzeAudio(videoPath, { buckets = 60 } = {}) {
     const db = (raw === '-inf' || raw === 'nan') ? -120 : parseFloat(raw);
     rmsPerBucket.push(db);
   }
+  // asetnsamples (p=0) emits the samples left over after the last full bucket
+  // as a short frame of its own: usually the decaying tail of the encoder or
+  // the resampler, far quieter than the track. It is not one of the buckets
+  // that were asked for.
+  if (rmsPerBucket.length > buckets) rmsPerBucket.length = buckets;
   const silentRatio = rmsPerBucket.length
     ? rmsPerBucket.filter(db => db < -50).length / rmsPerBucket.length
     : 1;
-  const peakDbfs = rmsPerBucket.length ? Math.max(...rmsPerBucket) : -Infinity;
+  // The peak is the highest sample peak of any frame, the leftover one
+  // included. The loudest bucket's RMS is not a peak: it sits 3 dB under the
+  // peak of a pure sine and 10 dB or more under that of music, so clipped
+  // audio never reached the -1 dBFS line.
+  let peakDbfs = -Infinity;
+  const peakRe = /Peak_level=(-?[0-9.]+|-inf|nan)/gi;
+  while ((m = peakRe.exec(r.stderr))) {
+    const raw = m[1].toLowerCase();
+    peakDbfs = Math.max(peakDbfs, (raw === '-inf' || raw === 'nan') ? -120 : parseFloat(raw));
+  }
   return { rmsPerBucket, silentRatio: +silentRatio.toFixed(3), hasAudio: true, peakDbfs: +peakDbfs.toFixed(1) };
 }
 
